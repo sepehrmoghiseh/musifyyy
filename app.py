@@ -4,6 +4,7 @@ import shutil
 import logging
 from datetime import datetime
 from collections import defaultdict
+from telegram import InputMediaAudio
 from telegram import (
     InlineKeyboardButton, 
     InlineKeyboardMarkup, 
@@ -243,16 +244,13 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle when user selects inline result - Download and send the actual audio."""
+    """Handle when user selects inline result - Download and send to THAT chat."""
     result = update.chosen_inline_result
     result_id = result.result_id
     query = result.query
     inline_message_id = result.inline_message_id
     
-    # Track the selection
-    analytics["inline_selections"][query.lower()] += 1
-    
-    # Get result details from cache
+    # Get result details
     if result_id not in inline_result_cache:
         logger.warning(f"Result {result_id} not found in cache")
         return
@@ -262,16 +260,15 @@ async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYP
     title = result_info["title"]
     url = result_info["url"]
     
+    analytics["inline_selections"][query.lower()] += 1
     analytics["platform_usage"][platform] += 1
     analytics["total_downloads"] += 1
     
     logger.info(f"📊 INLINE DOWNLOAD REQUEST:")
     logger.info(f"   User: {result.from_user.username or result.from_user.id}")
     logger.info(f"   Query: {query}")
-    logger.info(f"   Selected: {title}")
-    logger.info(f"   Platform: {platform}")
     
-    # Download the actual audio file
+    # Download the audio
     tmpdir = tempfile.mkdtemp()
     
     ydl_opts = {
@@ -311,34 +308,45 @@ async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYP
         
         logger.info(f"Download complete: {file_path}")
         
-        # Edit the inline message to show completion
+        # Upload to Telegram and get file_id
+        with open(file_path, "rb") as audio_file:
+            # Send to a temporary chat to upload to Telegram servers
+            # Then edit the inline message with the cached audio
+            message = await context.bot.send_audio(
+                chat_id=result.from_user.id,  # Upload via user's chat
+                audio=audio_file,
+                title=track_title,
+                performer=artist
+            )
+            
+            audio_file_id = message.audio.file_id
+            
+        # Now edit the inline message to show the actual audio
+        # Note: This will replace the text message with audio
         try:
+            await context.bot.edit_message_media(
+                inline_message_id=inline_message_id,
+                media=InputMediaAudio(
+                    media=audio_file_id,
+                    title=track_title,
+                    performer=artist,
+                    caption=f"🎵 via @musifyyyybot"
+                )
+            )
+            logger.info(f"Successfully edited inline message with audio")
+        except Exception as e:
+            logger.error(f"Could not edit inline message with audio: {e}")
+            # Fallback: just update text
             clean_title = title.replace("🎵 ", "").replace("📺 ", "")
             platform_emoji = "🎵" if platform == "soundcloud" else "📺"
             
             await context.bot.edit_message_text(
                 inline_message_id=inline_message_id,
                 text=f"{platform_emoji} *{clean_title}*\n\n"
-                     f"✅ Downloaded from {platform}!\n"
-                     f"🎵 via @musifyyyybot",
+                     f"✅ Downloaded! Check your chat with @musifyyyybot\n"
+                     f"📍 Source: {platform}",
                 parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.warning(f"Could not edit inline message: {e}")
-        
-        # Send the actual audio file to the user
-        try:
-            with open(file_path, "rb") as audio_file:
-                await context.bot.send_audio(
-                    chat_id=result.from_user.id,
-                    audio=audio_file,
-                    title=track_title,
-                    performer=artist,
-                    caption=f"🎵 {track_title}\n📍 Source: {platform.title()}\n🤖 via @musifyyyybot"
-                )
-            logger.info(f"Sent audio to user {result.from_user.id}")
-        except Exception as e:
-            logger.error(f"Could not send audio to user: {e}")
         
         # Cleanup
         try:
@@ -348,11 +356,10 @@ async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYP
         except:
             pass
         
-        # Clean up cache
         del inline_result_cache[result_id]
         
     except Exception as e:
-        logger.error(f"Download failed for inline result: {e}")
+        logger.error(f"Download failed: {e}")
         try:
             await context.bot.edit_message_text(
                 inline_message_id=inline_message_id,
