@@ -26,22 +26,45 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
 
+# Store search results temporarily
+search_cache = {}
 
-# ========== SOUND SEARCH ==========
-def sc_search(query: str, n: int = 5):
-    """Search SoundCloud via yt-dlp."""
-    logger.info(f"Searching SoundCloud for: {query}")
-    opts = {"quiet": True, "extract_flat": "in_playlist"}
+
+# ========== MUSIC SEARCH ==========
+def music_search(query: str, n: int = 6):
+    """Search for music using YouTube (more reliable than SoundCloud)."""
+    logger.info(f"Searching for: {query}")
+    
+    # Try YouTube first (most reliable)
+    opts = {
+        "quiet": True,
+        "extract_flat": "in_playlist",
+        "default_search": "ytsearch"
+    }
+    
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"scsearch{n}:{query}", download=False)
+            info = ydl.extract_info(f"ytsearch{n}:{query}", download=False)
+        
         results = []
         if info and "entries" in info:
             for e in info["entries"]:
                 title = e.get("title", "Unknown title")
-                url = e.get("url") or e.get("webpage_url")
+                url = e.get("url") or e.get("webpage_url") or e.get("id")
+                
+                # Make sure we have a valid URL
+                if url and not url.startswith("http"):
+                    url = f"https://www.youtube.com/watch?v={url}"
+                
                 if url:
+                    # Add duration if available
+                    duration = e.get("duration")
+                    if duration:
+                        mins = duration // 60
+                        secs = duration % 60
+                        title = f"{title} ({mins}:{secs:02d})"
                     results.append((title, url))
+        
         logger.info(f"Found {len(results)} results")
         return results
     except Exception as e:
@@ -49,15 +72,14 @@ def sc_search(query: str, n: int = 5):
         return []
 
 
-# Store search results temporarily (in production, use Redis or database)
-search_cache = {}
-
 # ========== HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
     await update.message.reply_text(
-        "👋 Send me a song or artist name (e.g. *lady gaga shallow*)\n"
-        "I'll search SoundCloud for you 🎵",
+        "🎵 *Music Downloader Bot*\n\n"
+        "Send me a song or artist name and I'll find it for you!\n\n"
+        "Example: `lady gaga shallow`\n\n"
+        "I search YouTube Music for the best quality audio.",
         parse_mode="Markdown"
     )
 
@@ -68,24 +90,28 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     logger.info(f"Search query received: {q}")
-    msg = await update.message.reply_text(f'🔍 Searching SoundCloud for "{q}"…')
+    msg = await update.message.reply_text(f"🔍 Searching for *{q}*...", parse_mode="Markdown")
 
     try:
-        results = sc_search(q, n=SEARCH_RESULTS)
+        results = music_search(q, n=SEARCH_RESULTS)
         if not results:
-            await msg.edit_text("❌ No results found.")
+            await msg.edit_text("❌ No results found. Try a different search.")
             return
 
-        # Store results with short IDs (to fit in 64 byte callback limit)
+        # Store results with short IDs
         user_id = update.effective_user.id
         search_cache[user_id] = results
         
-        # Create buttons with index instead of full URL
+        # Create buttons with index
         buttons = []
         for i, (title, url) in enumerate(results):
-            buttons.append([InlineKeyboardButton(title[:60], callback_data=f"{i}")])
+            buttons.append([InlineKeyboardButton(title[:65], callback_data=f"{i}")])
         
-        await msg.edit_text("🎵 Choose a track:", reply_markup=InlineKeyboardMarkup(buttons))
+        await msg.edit_text(
+            "🎵 *Choose a track:*",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
+        )
     except Exception as e:
         logger.error(f"Search handler error: {e}")
         await msg.edit_text(f"⚠️ Error: {e}")
@@ -112,29 +138,63 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     logger.info(f"Download requested: {url}")
-    status = await q.edit_message_text("🎧 Downloading track… please wait")
+    status = await q.edit_message_text("⏳ Downloading... This may take a minute.")
 
     tmpdir = tempfile.mkdtemp()
     ydl_opts = {
         "format": "bestaudio/best",
-        "outtmpl": os.path.join(tmpdir, "track.%(ext)s"),
-        "quiet": True,
-        "noplaylist": True
+        "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
+        "quiet": False,
+        "no_warnings": False,
+        "noplaylist": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "prefer_ffmpeg": True,
+        "keepvideo": False
     }
 
     try:
+        logger.info(f"Starting download from: {url}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            title = info.get("title", "SoundCloud Track")
+            # Find the output file
+            base_path = ydl.prepare_filename(info)
+            file_path = base_path.rsplit('.', 1)[0] + '.mp3'
+            track_title = info.get("title", "Audio Track")
+            artist = info.get("artist") or info.get("uploader", "Unknown Artist")
 
+        logger.info(f"Download complete: {file_path}")
+        
+        # Send the audio file
         with open(file_path, "rb") as audio_file:
-            await q.message.reply_audio(audio=audio_file, title=title)
-        await status.edit_text(f"✅ Sent: {title}")
-        logger.info(f"Successfully sent: {title}")
+            await q.message.reply_audio(
+                audio=audio_file,
+                title=track_title,
+                performer=artist,
+                caption=f"🎵 {track_title}"
+            )
+        
+        await status.edit_text(f"✅ Sent: *{track_title}*", parse_mode="Markdown")
+        logger.info(f"Successfully sent: {track_title}")
+        
+        # Cleanup
+        try:
+            os.remove(file_path)
+            if os.path.exists(base_path):
+                os.remove(base_path)
+        except:
+            pass
+            
     except Exception as e:
         logger.error(f"Download error: {e}")
-        await status.edit_text(f"⚠️ Couldn't send audio.\n{e}\nLink: {url}")
+        await status.edit_text(
+            f"⚠️ Couldn't download the audio.\n\n"
+            f"Error: {str(e)[:100]}\n\n"
+            f"Try another track or search again."
+        )
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,15 +203,6 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ========== MAIN APP ==========
-async def setup_webhook(app: Application):
-    """Setup webhook after application starts."""
-    await app.bot.set_webhook(
-        url=f"{WEBHOOK_BASE_URL}/webhook",
-        allowed_updates=Update.ALL_TYPES
-    )
-    logger.info(f"✅ Webhook set to: {WEBHOOK_BASE_URL}/webhook")
-
-
 def build_app() -> Application:
     if not BOT_TOKEN:
         raise RuntimeError("❌ BOT_TOKEN is missing.")
@@ -168,7 +219,7 @@ def build_app() -> Application:
 
 
 if __name__ == "__main__":
-    logger.info("Starting bot...")
+    logger.info("Starting Music Bot...")
     app = build_app()
 
     if WEBHOOK_BASE_URL:
@@ -179,7 +230,7 @@ if __name__ == "__main__":
         logger.info(f"   URL: {webhook_url}")
         logger.info(f"   Port: {PORT}")
         
-        # Start webhook with proper configuration
+        # Start webhook
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
