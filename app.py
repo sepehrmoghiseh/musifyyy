@@ -1,6 +1,7 @@
 import os
 import tempfile
 import logging
+from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -28,6 +29,14 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
 
+# Find cookies.txt file path
+COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
+if not os.path.exists(COOKIES_FILE):
+    logger.warning(f"cookies.txt not found at {COOKIES_FILE}")
+    COOKIES_FILE = None
+else:
+    logger.info(f"Found cookies.txt at {COOKIES_FILE}")
+
 
 # Store search results temporarily
 search_cache = {}
@@ -43,8 +52,12 @@ def music_search(query: str, n: int = 6):
         "quiet": True,
         "extract_flat": "in_playlist",
         "default_search": "ytsearch",
-        "cookiefile": "cookies.txt",  # FIX: Add cookies
     }
+    
+    # Add cookies if available
+    if COOKIES_FILE:
+        opts["cookiefile"] = COOKIES_FILE
+        logger.info(f"Using cookies from {COOKIES_FILE}")
     
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -151,8 +164,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "quiet": False,
         "no_warnings": False,
         "noplaylist": True,
-        "cookiefile": "cookies.txt",          # FIX: Add cookies
-        "sleep_interval": 2,                   # FIX: Add delays
+        "sleep_interval": 2,
         "max_sleep_interval": 5,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
@@ -162,6 +174,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "prefer_ffmpeg": True,
         "keepvideo": False
     }
+    
+    # Add cookies if available
+    if COOKIES_FILE:
+        ydl_opts["cookiefile"] = COOKIES_FILE
+        logger.info(f"Using cookies for download: {COOKIES_FILE}")
 
     try:
         logger.info(f"Starting download from: {url}")
