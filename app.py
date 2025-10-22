@@ -31,12 +31,12 @@ SEARCH_RESULTS = 6
 # Find cookies.txt file - try multiple locations
 COOKIES_FILE = None
 possible_paths = [
+    "/etc/secrets/cookies.txt",                      # Render Secret Files (NEW - put first)
     "cookies.txt",                                    # Same directory
     os.path.join(os.path.dirname(__file__), "cookies.txt"),  # Script directory
     "/app/cookies.txt",                               # Render default
     os.path.join(os.getcwd(), "cookies.txt"),        # Current working directory
 ]
-
 for path in possible_paths:
     if os.path.exists(path):
         COOKIES_FILE = path
