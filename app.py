@@ -65,8 +65,8 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     logger.info(f"Search query received: {q}")
-    msg = await update.message.reply_text(f"🔍 Searching SoundCloud for "{q}"…")
-
+    msg = await update.message.reply_text(f'🔍 Searching SoundCloud for "{q}"…')
+    
     try:
         results = sc_search(q, n=SEARCH_RESULTS)
         if not results:
