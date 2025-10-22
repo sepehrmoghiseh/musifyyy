@@ -182,74 +182,134 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await q.edit_message_text("⏳ Downloading... This may take a minute.")
 
     tmpdir = tempfile.mkdtemp()
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
-        "quiet": False,
-        "no_warnings": False,
-        "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                # Use multiple clients for better compatibility - iOS works without cookies
-                "player_client": ["ios", "default", "web_safari"],
-                "player_js_version": ["actual"],
+    
+    # Try multiple download strategies
+    download_strategies = [
+        {
+            "name": "iOS + Cookies",
+            "opts": {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["ios"],
+                        "skip": ["hls", "dash"],
+                    }
+                },
+                "cookiefile": COOKIES_FILE if COOKIES_FILE and os.path.exists(COOKIES_FILE) else None
             }
         },
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "prefer_ffmpeg": True,
-        "keepvideo": False
-    }
+        {
+            "name": "iOS Only (No Cookies)",
+            "opts": {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["ios"],
+                        "skip": ["hls"],
+                    }
+                }
+            }
+        },
+        {
+            "name": "Android Music Client",
+            "opts": {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android_music"],
+                    }
+                }
+            }
+        },
+        {
+            "name": "mWeb Client",
+            "opts": {
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["mweb"],
+                    }
+                }
+            }
+        }
+    ]
     
-    # Add cookies if available (will be used as primary method)
-    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
-        ydl_opts["cookiefile"] = COOKIES_FILE
-        logger.info("Using cookies for download")
-    else:
-        logger.info("Using cookieless download (iOS client)")
-
-    try:
-        logger.info(f"Starting download from: {url}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            # Find the output file
-            base_path = ydl.prepare_filename(info)
-            file_path = base_path.rsplit('.', 1)[0] + '.mp3'
-            track_title = info.get("title", "Audio Track")
-            artist = info.get("artist") or info.get("uploader", "Unknown Artist")
-
-        logger.info(f"Download complete: {file_path}")
-        
-        # Send the audio file
-        with open(file_path, "rb") as audio_file:
-            await q.message.reply_audio(
-                audio=audio_file,
-                title=track_title,
-                performer=artist,
-                caption=f"🎵 {track_title}"
-            )
-        
-        await status.edit_text(f"✅ Sent: *{track_title}*", parse_mode="Markdown")
-        logger.info(f"Successfully sent: {track_title}")
-        
-        # Cleanup
+    success = False
+    last_error = None
+    
+    for strategy in download_strategies:
         try:
-            os.remove(file_path)
-            if os.path.exists(base_path):
-                os.remove(base_path)
-        except:
-            pass
+            logger.info(f"Trying strategy: {strategy['name']}")
             
-    except Exception as e:
-        logger.error(f"Download error: {e}")
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
+                "quiet": False,
+                "no_warnings": False,
+                "noplaylist": True,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
+                "prefer_ffmpeg": True,
+                "keepvideo": False
+            }
+            
+            # Merge strategy-specific options
+            if strategy['opts'].get('cookiefile'):
+                ydl_opts['cookiefile'] = strategy['opts']['cookiefile']
+            if strategy['opts'].get('extractor_args'):
+                ydl_opts['extractor_args'] = strategy['opts']['extractor_args']
+
+            logger.info(f"Starting download from: {url}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                # Find the output file
+                base_path = ydl.prepare_filename(info)
+                file_path = base_path.rsplit('.', 1)[0] + '.mp3'
+                track_title = info.get("title", "Audio Track")
+                artist = info.get("artist") or info.get("uploader", "Unknown Artist")
+
+            logger.info(f"Download complete with strategy: {strategy['name']}")
+            success = True
+            break  # Success! Exit the loop
+            
+        except Exception as e:
+            logger.warning(f"Strategy '{strategy['name']}' failed: {str(e)[:100]}")
+            last_error = e
+            continue  # Try next strategy
+    
+    if success:
+        try:
+            logger.info(f"Sending audio file: {file_path}")
+            
+            # Send the audio file
+            with open(file_path, "rb") as audio_file:
+                await q.message.reply_audio(
+                    audio=audio_file,
+                    title=track_title,
+                    performer=artist,
+                    caption=f"🎵 {track_title}"
+                )
+            
+            await status.edit_text(f"✅ Sent: *{track_title}*", parse_mode="Markdown")
+            logger.info(f"Successfully sent: {track_title}")
+            
+            # Cleanup
+            try:
+                os.remove(file_path)
+                if os.path.exists(base_path):
+                    os.remove(base_path)
+            except:
+                pass
+        except Exception as e:
+            logger.error(f"Failed to send audio: {e}")
+            await status.edit_text(f"⚠️ Downloaded but couldn't send: {str(e)[:50]}")
+    else:
+        logger.error(f"All download strategies failed. Last error: {last_error}")
         await status.edit_text(
-            f"⚠️ Couldn't download the audio.\n\n"
-            f"Error: {str(e)[:100]}\n\n"
+            f"⚠️ Couldn't download this track.\n\n"
+            f"YouTube is blocking downloads for this video.\n\n"
             f"Try another track or search again."
         )
+
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
