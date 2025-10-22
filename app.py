@@ -111,8 +111,10 @@ if __name__ == "__main__":
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
-            webhook_url=webhook_url
+            webhook_url=webhook_url,
+            webhook_path="/webhook"   # <-- add this line
         )
     else:
-        print("⚙️ Running locally with polling (no webhook set).")
+        print("⚙️ Running in polling mode…")
         app.run_polling()
+
