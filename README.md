@@ -4,7 +4,7 @@ A powerful Telegram bot for searching and downloading music from multiple platfo
 
 [![Telegram Bot](https://img.shields.io/badge/Telegram-@musifyyybot-blue?style=for-the-badge&logo=telegram)](https://t.me/musifyyybot)
 [![Python](https://img.shields.io/badge/Python-3.11+-green?style=for-the-badge&logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+
 
 ---
 
@@ -36,8 +36,6 @@ A powerful Telegram bot for searching and downloading music from multiple platfo
 ### Download Complete
 ![Downloaded Track](screenshots/downloaded-track.png)
 
-### Bot Statistics
-![Bot Stats](screenshots/bot-stats.png)
 
 ---
 
@@ -63,15 +61,6 @@ Start chatting with the bot: **[@musifyyybot](https://t.me/musifyyybot)**
 3. Track will be sent to the chat
 ```
 
-**View Statistics:**
-```
-Send /stats to see:
-- Total searches and downloads
-- Top queries
-- Platform usage breakdown
-```
-
----
 
 ## 🛠️ Deployment
 
