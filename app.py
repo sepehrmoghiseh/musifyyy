@@ -1,7 +1,6 @@
 import os
 import tempfile
 import logging
-from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -29,13 +28,24 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
 
-# Find cookies.txt file path
-COOKIES_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
-if not os.path.exists(COOKIES_FILE):
-    logger.warning(f"cookies.txt not found at {COOKIES_FILE}")
-    COOKIES_FILE = None
-else:
-    logger.info(f"Found cookies.txt at {COOKIES_FILE}")
+# Find cookies.txt file - try multiple locations
+COOKIES_FILE = None
+possible_paths = [
+    "cookies.txt",                                    # Same directory
+    os.path.join(os.path.dirname(__file__), "cookies.txt"),  # Script directory
+    "/app/cookies.txt",                               # Render default
+    os.path.join(os.getcwd(), "cookies.txt"),        # Current working directory
+]
+
+for path in possible_paths:
+    if os.path.exists(path):
+        COOKIES_FILE = path
+        logger.info(f"✅ Found cookies.txt at: {COOKIES_FILE}")
+        break
+
+if not COOKIES_FILE:
+    logger.warning(f"⚠️ cookies.txt not found. Tried locations: {possible_paths}")
+    logger.warning("Bot may encounter YouTube restrictions without cookies.")
 
 
 # Store search results temporarily
@@ -57,7 +67,6 @@ def music_search(query: str, n: int = 6):
     # Add cookies if available
     if COOKIES_FILE:
         opts["cookiefile"] = COOKIES_FILE
-        logger.info(f"Using cookies from {COOKIES_FILE}")
     
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -77,8 +86,8 @@ def music_search(query: str, n: int = 6):
                     # Add duration if available
                     duration = e.get("duration")
                     if duration:
-                        mins = int(duration // 60)  # FIX: Convert to int
-                        secs = int(duration % 60)   # FIX: Convert to int
+                        mins = int(duration // 60)
+                        secs = int(duration % 60)
                         title = f"{title} ({mins}:{secs:02d})"
                     results.append((title, url))
         
@@ -92,8 +101,9 @@ def music_search(query: str, n: int = 6):
 # ========== HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
+    cookie_status = "✅ With cookies" if COOKIES_FILE else "⚠️ Without cookies (limited)"
     await update.message.reply_text(
-        "🎵 *Music Downloader Bot*\n\n"
+        f"🎵 *Music Downloader Bot* {cookie_status}\n\n"
         "Send me a song or artist name and I'll find it for you!\n\n"
         "Example: `lady gaga shallow`\n\n"
         "I search YouTube Music for the best quality audio.",
@@ -178,7 +188,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Add cookies if available
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
-        logger.info(f"Using cookies for download: {COOKIES_FILE}")
 
     try:
         logger.info(f"Starting download from: {url}")
