@@ -13,6 +13,7 @@ from telegram.ext import (
 )
 import yt_dlp
 
+
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -20,11 +21,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ========== CONFIG ==========
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
+
 
 # Store search results temporarily
 search_cache = {}
@@ -35,10 +38,12 @@ def music_search(query: str, n: int = 6):
     """Search for music using YouTube (more reliable than SoundCloud)."""
     logger.info(f"Searching for: {query}")
     
+    # Try YouTube first (most reliable)
     opts = {
         "quiet": True,
         "extract_flat": "in_playlist",
-        "default_search": "ytsearch"
+        "default_search": "ytsearch",
+        "cookiefile": "cookies.txt",  # FIX: Add cookies
     }
     
     try:
@@ -51,14 +56,16 @@ def music_search(query: str, n: int = 6):
                 title = e.get("title", "Unknown title")
                 url = e.get("url") or e.get("webpage_url") or e.get("id")
                 
+                # Make sure we have a valid URL
                 if url and not url.startswith("http"):
                     url = f"https://www.youtube.com/watch?v={url}"
                 
                 if url:
+                    # Add duration if available
                     duration = e.get("duration")
                     if duration:
-                        mins = int(duration // 60)  # Convert to int
-                        secs = int(duration % 60)    # Convert to int
+                        mins = int(duration // 60)  # FIX: Convert to int
+                        secs = int(duration % 60)   # FIX: Convert to int
                         title = f"{title} ({mins}:{secs:02d})"
                     results.append((title, url))
         
@@ -67,7 +74,6 @@ def music_search(query: str, n: int = 6):
     except Exception as e:
         logger.error(f"Search error: {e}")
         return []
-
 
 
 # ========== HANDLERS ==========
@@ -145,6 +151,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "quiet": False,
         "no_warnings": False,
         "noplaylist": True,
+        "cookiefile": "cookies.txt",          # FIX: Add cookies
+        "sleep_interval": 2,                   # FIX: Add delays
+        "max_sleep_interval": 5,
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
