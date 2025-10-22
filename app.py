@@ -1,5 +1,6 @@
 import os
 import tempfile
+import shutil
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -30,22 +31,35 @@ SEARCH_RESULTS = 6
 
 # Find cookies.txt file - try multiple locations
 COOKIES_FILE = None
-possible_paths = [
-    "/etc/secrets/cookies.txt",                      # Render Secret Files (NEW - put first)
-    "cookies.txt",                                    # Same directory
-    os.path.join(os.path.dirname(__file__), "cookies.txt"),  # Script directory
-    "/app/cookies.txt",                               # Render default
-    os.path.join(os.getcwd(), "cookies.txt"),        # Current working directory
-]
-for path in possible_paths:
-    if os.path.exists(path):
-        COOKIES_FILE = path
-        logger.info(f"✅ Found cookies.txt at: {COOKIES_FILE}")
-        break
+secret_cookie_path = "/etc/secrets/cookies.txt"
+
+# If cookies exist in read-only secrets, copy to writable location
+if os.path.exists(secret_cookie_path):
+    try:
+        # Create a writable copy in /tmp
+        writable_cookie_path = "/tmp/cookies.txt"
+        shutil.copy(secret_cookie_path, writable_cookie_path)
+        COOKIES_FILE = writable_cookie_path
+        logger.info(f"✅ Copied cookies from {secret_cookie_path} to {writable_cookie_path}")
+    except Exception as e:
+        logger.error(f"Failed to copy cookies: {e}")
+else:
+    # Try other locations
+    possible_paths = [
+        "cookies.txt",
+        os.path.join(os.path.dirname(__file__), "cookies.txt"),
+        "/app/cookies.txt",
+        os.path.join(os.getcwd(), "cookies.txt"),
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            COOKIES_FILE = path
+            logger.info(f"✅ Found cookies.txt at: {COOKIES_FILE}")
+            break
 
 if not COOKIES_FILE:
-    logger.warning(f"⚠️ cookies.txt not found. Tried locations: {possible_paths}")
-    logger.warning("Bot may encounter YouTube restrictions without cookies.")
+    logger.warning(f"⚠️ cookies.txt not found. Bot may encounter YouTube restrictions without cookies.")
 
 
 # Store search results temporarily
