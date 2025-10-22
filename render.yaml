@@ -1,11 +1,10 @@
 services:
   - type: web
-    name: soundcloud-telegram-bot
-    env: python
-    plan: free
+    name: musifyyy
+    runtime: python
     buildCommand: |
-      apt-get update && apt-get install -y ffmpeg
       pip install -r requirements.txt
+      apt-get update && apt-get install -y ffmpeg
     startCommand: python app.py
     envVars:
       - key: BOT_TOKEN
