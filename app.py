@@ -106,15 +106,16 @@ if __name__ == "__main__":
     app = build_app()
 
     if WEBHOOK_BASE_URL:
+        # Webhook mode for Render
         webhook_url = f"{WEBHOOK_BASE_URL}/webhook"
         print(f"🚀 Starting webhook at {webhook_url} (port {PORT})")
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
-            webhook_url=webhook_url,
-            webhook_path="/webhook"   # <-- add this line
+            webhook_url=webhook_url
         )
     else:
+        # Local dev: polling mode
         print("⚙️ Running in polling mode…")
         app.run_polling()
 
