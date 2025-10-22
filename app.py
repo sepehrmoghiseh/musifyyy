@@ -188,6 +188,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "quiet": False,
         "no_warnings": False,
         "noplaylist": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["default", "web_safari"],  # Use Safari client for Oct 2025 fix
+                "player_js_version": ["actual"],
+            }
+        },
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -197,7 +203,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keepvideo": False
     }
     
-    # Add cookies if available (web client is used by default with cookies)
+    # Add cookies if available
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
 
