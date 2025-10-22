@@ -73,14 +73,17 @@ def music_search(query: str, n: int = 6):
     
     # Try YouTube first (most reliable)
     opts = {
-    "quiet": True,
-    "extract_flat": "in_playlist",
-    "default_search": "ytsearch",
-    "username": "oauth2",
-    "password": "",
-}
+        "quiet": True,
+        "extract_flat": "in_playlist",
+        "default_search": "ytsearch",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],  # Use Android client
+            }
+        },
+    }
 
-    # Add cookies if available
+    # Add cookies if available (NO OAuth for search!)
     if COOKIES_FILE:
         opts["cookiefile"] = COOKIES_FILE
     
@@ -185,26 +188,26 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tmpdir = tempfile.mkdtemp()
     ydl_opts = {
-    "format": "bestaudio/best",
-    "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
-    "quiet": False,
-    "no_warnings": False,
-    "noplaylist": True,
-    "sleep_interval": 2,
-    "max_sleep_interval": 5,
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["android", "web"],  # Use Android client to avoid bot detection
-        }
-    },
-    "postprocessors": [{
-        "key": "FFmpegExtractAudio",
-        "preferredcodec": "mp3",
-        "preferredquality": "192",
-    }],
-    "prefer_ffmpeg": True,
-    "keepvideo": False
-}
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
+        "quiet": False,
+        "no_warnings": False,
+        "noplaylist": True,
+        "sleep_interval": 2,
+        "max_sleep_interval": 5,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],  # Use Android client
+            }
+        },
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "prefer_ffmpeg": True,
+        "keepvideo": False
+    }
     
     # Add cookies if available
     if COOKIES_FILE:
