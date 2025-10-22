@@ -76,14 +76,9 @@ def music_search(query: str, n: int = 6):
         "quiet": True,
         "extract_flat": "in_playlist",
         "default_search": "ytsearch",
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web"],  # Use Android client
-            }
-        },
     }
 
-    # Add cookies if available (NO OAuth for search!)
+    # Add cookies if available
     if COOKIES_FILE:
         opts["cookiefile"] = COOKIES_FILE
     
@@ -193,13 +188,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "quiet": False,
         "no_warnings": False,
         "noplaylist": True,
-        "sleep_interval": 2,
-        "max_sleep_interval": 5,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web"],  # Use Android client
-            }
-        },
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -209,7 +197,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keepvideo": False
     }
     
-    # Add cookies if available
+    # Add cookies if available (web client is used by default with cookies)
     if COOKIES_FILE:
         ydl_opts["cookiefile"] = COOKIES_FILE
 
