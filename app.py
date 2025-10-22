@@ -35,7 +35,6 @@ def music_search(query: str, n: int = 6):
     """Search for music using YouTube (more reliable than SoundCloud)."""
     logger.info(f"Searching for: {query}")
     
-    # Try YouTube first (most reliable)
     opts = {
         "quiet": True,
         "extract_flat": "in_playlist",
@@ -52,16 +51,14 @@ def music_search(query: str, n: int = 6):
                 title = e.get("title", "Unknown title")
                 url = e.get("url") or e.get("webpage_url") or e.get("id")
                 
-                # Make sure we have a valid URL
                 if url and not url.startswith("http"):
                     url = f"https://www.youtube.com/watch?v={url}"
                 
                 if url:
-                    # Add duration if available
                     duration = e.get("duration")
                     if duration:
-                        mins = duration // 60
-                        secs = duration % 60
+                        mins = int(duration // 60)  # Convert to int
+                        secs = int(duration % 60)    # Convert to int
                         title = f"{title} ({mins}:{secs:02d})"
                     results.append((title, url))
         
@@ -70,6 +67,7 @@ def music_search(query: str, n: int = 6):
     except Exception as e:
         logger.error(f"Search error: {e}")
         return []
+
 
 
 # ========== HANDLERS ==========
