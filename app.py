@@ -221,11 +221,11 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 description=f"From {platform} - Tap to send",
                 input_message_content=InputTextMessageContent(
                     message_text=f"{platform_emoji} *{clean_title}*\n\n"
-                                 f"🎵 Downloading from {platform}...\n"
-                                 f"⏳ Please wait, this may take a moment.",
+                                f"🎵 Downloading from {platform}...\n"
+                                f"⏳ Please wait, this may take a moment.",
                     parse_mode="Markdown"
-                ),
-                thumb_url="https://i.imgur.com/placeholder.png"  # Optional: add a music note icon
+                )
+                # Removed thumb_url - it's optional
             )
             
             inline_results.append(inline_result)
