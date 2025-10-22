@@ -2,6 +2,8 @@ import os
 import tempfile
 import shutil
 import logging
+import threading
+from flask import Flask, jsonify
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -59,11 +61,30 @@ else:
             break
 
 if not COOKIES_FILE:
-    logger.warning(f"⚠️ cookies.txt not found. Bot may encounter YouTube restrictions without cookies.")
+    logger.warning(f"⚠️ cookies.txt not found. Bot will work with limited functionality.")
 
 
 # Store search results temporarily
 search_cache = {}
+
+
+# ========== FLASK HEALTH ENDPOINT ==========
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+@flask_app.route('/health')
+def health():
+    """Health check endpoint to prevent Render from sleeping"""
+    cookie_status = "with_cookies" if COOKIES_FILE and os.path.exists(COOKIES_FILE) else "no_cookies"
+    return jsonify({
+        'status': 'alive',
+        'service': 'Music Downloader Bot',
+        'cookies': cookie_status
+    }), 200
+
+def run_flask():
+    """Run Flask server in a separate thread"""
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 
 # ========== MUSIC SEARCH ==========
@@ -79,7 +100,7 @@ def music_search(query: str, n: int = 6):
     }
 
     # Add cookies if available
-    if COOKIES_FILE:
+    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
         opts["cookiefile"] = COOKIES_FILE
     
     try:
@@ -115,7 +136,7 @@ def music_search(query: str, n: int = 6):
 # ========== HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
-    cookie_status = "✅ With cookies" if COOKIES_FILE else "⚠️ Without cookies (limited)"
+    cookie_status = "✅ With cookies" if COOKIES_FILE and os.path.exists(COOKIES_FILE) else "⚠️ Without cookies (limited)"
     await update.message.reply_text(
         f"🎵 *Music Downloader Bot* {cookie_status}\n\n"
         "Send me a song or artist name and I'll find it for you!\n\n"
@@ -190,7 +211,8 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "noplaylist": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["default", "web_safari"],  # Use Safari client for Oct 2025 fix
+                # Use multiple clients for better compatibility - iOS works without cookies
+                "player_client": ["ios", "default", "web_safari"],
                 "player_js_version": ["actual"],
             }
         },
@@ -203,9 +225,12 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keepvideo": False
     }
     
-    # Add cookies if available
-    if COOKIES_FILE:
+    # Add cookies if available (will be used as primary method)
+    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
         ydl_opts["cookiefile"] = COOKIES_FILE
+        logger.info("Using cookies for download")
+    else:
+        logger.info("Using cookieless download (iOS client)")
 
     try:
         logger.info(f"Starting download from: {url}")
@@ -271,6 +296,13 @@ def build_app() -> Application:
 
 if __name__ == "__main__":
     logger.info("Starting Music Bot...")
+    
+    # Start Flask health check server in separate thread
+    logger.info("Starting health check endpoint...")
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # Build Telegram bot
     app = build_app()
 
     if WEBHOOK_BASE_URL:
