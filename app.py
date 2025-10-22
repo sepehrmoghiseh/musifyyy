@@ -2,7 +2,15 @@ import os
 import tempfile
 import shutil
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InlineQueryResultAudio
+from datetime import datetime
+from collections import defaultdict
+from telegram import (
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup, 
+    Update, 
+    InlineQueryResultArticle,
+    InputTextMessageContent
+)
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -10,6 +18,7 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     InlineQueryHandler,
+    ChosenInlineResultHandler,
     ContextTypes,
     filters
 )
@@ -30,6 +39,15 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
+
+# Analytics storage
+analytics = {
+    "total_searches": 0,
+    "total_downloads": 0,
+    "popular_queries": defaultdict(int),
+    "platform_usage": defaultdict(int),
+    "inline_selections": defaultdict(int)
+}
 
 # Find cookies.txt file
 COOKIES_FILE = None
@@ -63,12 +81,15 @@ if not COOKIES_FILE:
 
 # Store search results temporarily
 search_cache = {}
+inline_result_cache = {}
 
 
 # ========== MUSIC SEARCH ==========
 def music_search(query: str, n: int = 6):
     """Search across multiple music platforms."""
     logger.info(f"Searching for: {query}")
+    analytics["total_searches"] += 1
+    analytics["popular_queries"][query.lower()] += 1
     
     all_results = []
     
@@ -160,49 +181,58 @@ def music_search(query: str, n: int = 6):
     return all_results[:n] if all_results else []
 
 
-# ========== INLINE MODE HANDLER ==========
+# ========== INLINE MODE HANDLERS ==========
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline queries."""
+    """Handle inline queries - FIXED to send actual messages."""
     query = update.inline_query.query
     
     if not query or len(query) < 3:
-        # Show placeholder when query is too short
         return
     
     logger.info(f"Inline query received: {query}")
     
     try:
-        # Search for music
-        results = music_search(query, n=10)  # Get more results for inline mode
+        results = music_search(query, n=10)
         
         if not results:
-            # No results found
             return
         
-        # Convert results to InlineQueryResultAudio format
         inline_results = []
         
         for title, url, platform in results:
-            # Create unique ID for each result
             result_id = str(uuid4())
             
-            # Extract clean title (remove emojis)
-            clean_title = title.replace("🎵 ", "").replace("📺 ", "")
+            # Store result info for later tracking
+            inline_result_cache[result_id] = {
+                "title": title,
+                "url": url,
+                "platform": platform,
+                "query": query
+            }
             
-            # Create inline result
-            inline_result = InlineQueryResultAudio(
+            # Extract clean title
+            clean_title = title.replace("🎵 ", "").replace("📺 ", "")
+            platform_emoji = "🎵" if platform == "soundcloud" else "📺"
+            
+            # Create inline result as ARTICLE (not audio)
+            inline_result = InlineQueryResultArticle(
                 id=result_id,
-                audio_url=url,
                 title=clean_title,
-                performer=f"via {platform}",
+                description=f"From {platform} - Tap to send",
+                input_message_content=InputTextMessageContent(
+                    message_text=f"{platform_emoji} *{clean_title}*\n\n"
+                                 f"🎵 Downloading from {platform}...\n"
+                                 f"⏳ Please wait, this may take a moment.",
+                    parse_mode="Markdown"
+                ),
+                thumb_url="https://i.imgur.com/placeholder.png"  # Optional: add a music note icon
             )
             
             inline_results.append(inline_result)
         
-        # Answer the inline query
         await update.inline_query.answer(
             inline_results,
-            cache_time=300,  # Cache results for 5 minutes
+            cache_time=300,
             is_personal=True
         )
         
@@ -212,6 +242,128 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Inline query error: {e}")
 
 
+async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle when user selects inline result - Download and send the actual audio."""
+    result = update.chosen_inline_result
+    result_id = result.result_id
+    query = result.query
+    inline_message_id = result.inline_message_id
+    
+    # Track the selection
+    analytics["inline_selections"][query.lower()] += 1
+    
+    # Get result details from cache
+    if result_id not in inline_result_cache:
+        logger.warning(f"Result {result_id} not found in cache")
+        return
+    
+    result_info = inline_result_cache[result_id]
+    platform = result_info["platform"]
+    title = result_info["title"]
+    url = result_info["url"]
+    
+    analytics["platform_usage"][platform] += 1
+    analytics["total_downloads"] += 1
+    
+    logger.info(f"📊 INLINE DOWNLOAD REQUEST:")
+    logger.info(f"   User: {result.from_user.username or result.from_user.id}")
+    logger.info(f"   Query: {query}")
+    logger.info(f"   Selected: {title}")
+    logger.info(f"   Platform: {platform}")
+    
+    # Download the actual audio file
+    tmpdir = tempfile.mkdtemp()
+    
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
+        "quiet": False,
+        "no_warnings": False,
+        "noplaylist": True,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "prefer_ffmpeg": True,
+        "keepvideo": False
+    }
+    
+    if platform == "youtube":
+        ydl_opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["ios", "web"],
+                "skip": ["hls"],
+            }
+        }
+        if COOKIES_FILE and os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
+    
+    try:
+        logger.info(f"Downloading from {platform}: {url}")
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            base_path = ydl.prepare_filename(info)
+            file_path = base_path.rsplit('.', 1)[0] + '.mp3'
+            track_title = info.get("title", "Audio Track")
+            artist = info.get("artist") or info.get("uploader", "Unknown Artist")
+        
+        logger.info(f"Download complete: {file_path}")
+        
+        # Edit the inline message to show completion
+        try:
+            clean_title = title.replace("🎵 ", "").replace("📺 ", "")
+            platform_emoji = "🎵" if platform == "soundcloud" else "📺"
+            
+            await context.bot.edit_message_text(
+                inline_message_id=inline_message_id,
+                text=f"{platform_emoji} *{clean_title}*\n\n"
+                     f"✅ Downloaded from {platform}!\n"
+                     f"🎵 via @musifyyyybot",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Could not edit inline message: {e}")
+        
+        # Send the actual audio file to the user
+        try:
+            with open(file_path, "rb") as audio_file:
+                await context.bot.send_audio(
+                    chat_id=result.from_user.id,
+                    audio=audio_file,
+                    title=track_title,
+                    performer=artist,
+                    caption=f"🎵 {track_title}\n📍 Source: {platform.title()}\n🤖 via @musifyyyybot"
+                )
+            logger.info(f"Sent audio to user {result.from_user.id}")
+        except Exception as e:
+            logger.error(f"Could not send audio to user: {e}")
+        
+        # Cleanup
+        try:
+            os.remove(file_path)
+            if os.path.exists(base_path):
+                os.remove(base_path)
+        except:
+            pass
+        
+        # Clean up cache
+        del inline_result_cache[result_id]
+        
+    except Exception as e:
+        logger.error(f"Download failed for inline result: {e}")
+        try:
+            await context.bot.edit_message_text(
+                inline_message_id=inline_message_id,
+                text=f"⚠️ Download failed: {str(e)[:100]}\n\n"
+                     f"Try searching again with @musifyyyybot",
+                parse_mode="Markdown"
+            )
+        except:
+            pass
+
+
 # ========== HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
@@ -219,7 +371,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎵 *Multi-Platform Music Downloader Bot*\n\n"
         "**Two ways to use me:**\n\n"
         "1️⃣ *Direct mode:* Send me a song name here\n"
-        "2️⃣ *Inline mode:* Type `@yourbot song name` in any chat\n\n"
+        "2️⃣ *Inline mode:* Type `@musifyyyybot song name` in any chat\n\n"
         "**Search Priority:**\n"
         "🎵 SoundCloud (primary)\n"
         "🎸 Bandcamp\n"
@@ -227,10 +379,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎧 Mixcloud\n"
         "📺 YouTube (fallback)\n\n"
         "**Example:** `lady gaga`\n"
-        "**Inline:** `@yourbot lady gaga` (in any chat)\n\n"
-        "High-quality audio from multiple sources!",
+        "**Inline:** `@musifyyyybot lady gaga`\n\n"
+        "Type /stats to see usage statistics!",
         parse_mode="Markdown"
     )
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show bot statistics."""
+    logger.info("Stats command received")
+    
+    top_queries = sorted(analytics["popular_queries"].items(), key=lambda x: x[1], reverse=True)[:5]
+    top_inline = sorted(analytics["inline_selections"].items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    stats_text = (
+        "📊 *Bot Statistics*\n\n"
+        f"🔍 Total Searches: {analytics['total_searches']}\n"
+        f"⬇️ Total Downloads: {analytics['total_downloads']}\n\n"
+        "*Top Search Queries:*\n"
+    )
+    
+    for i, (query, count) in enumerate(top_queries, 1):
+        stats_text += f"{i}. {query} ({count}x)\n"
+    
+    stats_text += "\n*Top Inline Selections:*\n"
+    
+    for i, (query, count) in enumerate(top_inline, 1):
+        stats_text += f"{i}. {query} ({count}x)\n"
+    
+    stats_text += "\n*Platform Usage:*\n"
+    for platform, count in analytics["platform_usage"].items():
+        stats_text += f"• {platform}: {count} downloads\n"
+    
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -250,16 +431,14 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• Different search terms\n"
                 "• Artist name only\n"
                 "• Song title only\n\n"
-                "Or use inline mode: `@yourbot song name`",
+                "Or use inline mode: `@musifyyyybot song name`",
                 parse_mode="Markdown"
             )
             return
 
-        # Store results
         user_id = update.effective_user.id
         search_cache[user_id] = results
         
-        # Create buttons
         buttons = []
         for i, (title, url, platform) in enumerate(results):
             display_title = title[:65] + "..." if len(title) > 65 else title
@@ -303,6 +482,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"Download requested from {platform}: {url}")
     status = await q.edit_message_text(f"⏳ Downloading from {platform}...")
+
+    analytics["total_downloads"] += 1
+    analytics["platform_usage"][platform] += 1
 
     tmpdir = tempfile.mkdtemp()
     
@@ -366,7 +548,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await status.edit_text(f"✅ Sent: *{track_title}*\n📍 From: {platform.title()}", parse_mode="Markdown")
             
-            # Cleanup
             try:
                 os.remove(file_path)
                 if os.path.exists(base_path):
@@ -390,9 +571,10 @@ def build_app() -> Application:
     
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(InlineQueryHandler(inline_query))  # NEW: Inline mode handler
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(ChosenInlineResultHandler(chosen_inline_result))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
     app.add_error_handler(error_handler)
@@ -401,7 +583,7 @@ def build_app() -> Application:
 
 
 if __name__ == "__main__":
-    logger.info("Starting Multi-Platform Music Bot with Inline Mode...")
+    logger.info("Starting Multi-Platform Music Bot with Analytics...")
     app = build_app()
 
     if WEBHOOK_BASE_URL:
