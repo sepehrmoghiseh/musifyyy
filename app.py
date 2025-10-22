@@ -49,6 +49,9 @@ def sc_search(query: str, n: int = 5):
         return []
 
 
+# Store search results temporarily (in production, use Redis or database)
+search_cache = {}
+
 # ========== HANDLERS ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
@@ -66,14 +69,22 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"Search query received: {q}")
     msg = await update.message.reply_text(f'🔍 Searching SoundCloud for "{q}"…')
-    
+
     try:
         results = sc_search(q, n=SEARCH_RESULTS)
         if not results:
             await msg.edit_text("❌ No results found.")
             return
 
-        buttons = [[InlineKeyboardButton(title[:60], callback_data=url)] for title, url in results]
+        # Store results with short IDs (to fit in 64 byte callback limit)
+        user_id = update.effective_user.id
+        search_cache[user_id] = results
+        
+        # Create buttons with index instead of full URL
+        buttons = []
+        for i, (title, url) in enumerate(results):
+            buttons.append([InlineKeyboardButton(title[:60], callback_data=f"{i}")])
+        
         await msg.edit_text("🎵 Choose a track:", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
         logger.error(f"Search handler error: {e}")
@@ -83,7 +94,22 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    url = q.data
+    
+    # Get the track index from callback data
+    try:
+        track_index = int(q.data)
+        user_id = update.effective_user.id
+        
+        # Retrieve URL from cache
+        if user_id not in search_cache or track_index >= len(search_cache[user_id]):
+            await q.edit_message_text("❌ Track not found. Please search again.")
+            return
+        
+        title, url = search_cache[user_id][track_index]
+        
+    except (ValueError, KeyError):
+        await q.edit_message_text("❌ Invalid selection. Please search again.")
+        return
     
     logger.info(f"Download requested: {url}")
     status = await q.edit_message_text("🎧 Downloading track… please wait")
