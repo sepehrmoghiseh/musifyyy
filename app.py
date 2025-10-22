@@ -2,8 +2,6 @@ import os
 import tempfile
 import shutil
 import logging
-import threading
-from flask import Flask, jsonify
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -66,25 +64,6 @@ if not COOKIES_FILE:
 
 # Store search results temporarily
 search_cache = {}
-
-
-# ========== FLASK HEALTH ENDPOINT ==========
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-@flask_app.route('/health')
-def health():
-    """Health check endpoint to prevent Render from sleeping"""
-    cookie_status = "with_cookies" if COOKIES_FILE and os.path.exists(COOKIES_FILE) else "no_cookies"
-    return jsonify({
-        'status': 'alive',
-        'service': 'Music Downloader Bot',
-        'cookies': cookie_status
-    }), 200
-
-def run_flask():
-    """Run Flask server in a separate thread"""
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
 
 # ========== MUSIC SEARCH ==========
@@ -296,13 +275,6 @@ def build_app() -> Application:
 
 if __name__ == "__main__":
     logger.info("Starting Music Bot...")
-    
-    # Start Flask health check server in separate thread
-    logger.info("Starting health check endpoint...")
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    # Build Telegram bot
     app = build_app()
 
     if WEBHOOK_BASE_URL:
@@ -313,7 +285,7 @@ if __name__ == "__main__":
         logger.info(f"   URL: {webhook_url}")
         logger.info(f"   Port: {PORT}")
         
-        # Start webhook
+        # Start webhook - this handles both Telegram and health checks on the same port
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
