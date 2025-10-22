@@ -2,17 +2,19 @@ import os
 import tempfile
 import shutil
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InlineQueryResultAudio
 from telegram.ext import (
     Application,
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    InlineQueryHandler,
     ContextTypes,
     filters
 )
 import yt_dlp
+from uuid import uuid4
 
 
 # Enable logging
@@ -29,11 +31,10 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 SEARCH_RESULTS = 6
 
-# Find cookies.txt file - try multiple locations (only needed for YouTube fallback)
+# Find cookies.txt file
 COOKIES_FILE = None
 secret_cookie_path = "/etc/secrets/cookies.txt"
 
-# If cookies exist in read-only secrets, copy to writable location
 if os.path.exists(secret_cookie_path):
     try:
         writable_cookie_path = "/tmp/cookies.txt"
@@ -64,54 +65,14 @@ if not COOKIES_FILE:
 search_cache = {}
 
 
-# Platform configurations with emojis and search prefixes
-PLATFORMS = [
-    {
-        "name": "SoundCloud",
-        "emoji": "🎵",
-        "search_prefix": "scsearch",
-        "needs_cookies": False,
-        "color": "orange"
-    },
-    {
-        "name": "Bandcamp",
-        "emoji": "🎸",
-        "search_prefix": None,  # Bandcamp doesn't have search, only direct URLs
-        "needs_cookies": False,
-        "color": "blue"
-    },
-    {
-        "name": "VK Music",
-        "emoji": "🎼",
-        "search_prefix": None,  # VK search not well supported
-        "needs_cookies": False,
-        "color": "blue"
-    },
-    {
-        "name": "Mixcloud",
-        "emoji": "🎧",
-        "search_prefix": None,  # Mixcloud search limited
-        "needs_cookies": False,
-        "color": "blue"
-    },
-    {
-        "name": "YouTube",
-        "emoji": "📺",
-        "search_prefix": "ytsearch",
-        "needs_cookies": True,
-        "color": "red"
-    }
-]
-
-
 # ========== MUSIC SEARCH ==========
 def music_search(query: str, n: int = 6):
-    """Search across multiple music platforms for better success rate."""
+    """Search across multiple music platforms."""
     logger.info(f"Searching for: {query}")
     
     all_results = []
     
-    # Try SoundCloud first (most reliable)
+    # Try SoundCloud first
     try:
         logger.info("Trying SoundCloud search...")
         opts = {
@@ -146,11 +107,10 @@ def music_search(query: str, n: int = 6):
     except Exception as e:
         logger.warning(f"SoundCloud search failed: {e}")
     
-    # If we have enough results from SoundCloud, return them
     if len(all_results) >= n:
         return all_results[:n]
     
-    # Try YouTube as fallback (with iOS client for better compatibility)
+    # Try YouTube as fallback
     try:
         logger.info("Trying YouTube search...")
         opts = {
@@ -165,7 +125,6 @@ def music_search(query: str, n: int = 6):
             }
         }
         
-        # Add cookies if available
         if COOKIES_FILE and os.path.exists(COOKIES_FILE):
             opts["cookiefile"] = COOKIES_FILE
         
@@ -197,8 +156,60 @@ def music_search(query: str, n: int = 6):
     except Exception as e:
         logger.warning(f"YouTube search failed: {e}")
     
-    logger.info(f"Total results from all platforms: {len(all_results)}")
+    logger.info(f"Total results: {len(all_results)}")
     return all_results[:n] if all_results else []
+
+
+# ========== INLINE MODE HANDLER ==========
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle inline queries."""
+    query = update.inline_query.query
+    
+    if not query or len(query) < 3:
+        # Show placeholder when query is too short
+        return
+    
+    logger.info(f"Inline query received: {query}")
+    
+    try:
+        # Search for music
+        results = music_search(query, n=10)  # Get more results for inline mode
+        
+        if not results:
+            # No results found
+            return
+        
+        # Convert results to InlineQueryResultAudio format
+        inline_results = []
+        
+        for title, url, platform in results:
+            # Create unique ID for each result
+            result_id = str(uuid4())
+            
+            # Extract clean title (remove emojis)
+            clean_title = title.replace("🎵 ", "").replace("📺 ", "")
+            
+            # Create inline result
+            inline_result = InlineQueryResultAudio(
+                id=result_id,
+                audio_url=url,
+                title=clean_title,
+                performer=f"via {platform}",
+            )
+            
+            inline_results.append(inline_result)
+        
+        # Answer the inline query
+        await update.inline_query.answer(
+            inline_results,
+            cache_time=300,  # Cache results for 5 minutes
+            is_personal=True
+        )
+        
+        logger.info(f"Answered inline query with {len(inline_results)} results")
+        
+    except Exception as e:
+        logger.error(f"Inline query error: {e}")
 
 
 # ========== HANDLERS ==========
@@ -206,15 +217,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Start command received")
     await update.message.reply_text(
         "🎵 *Multi-Platform Music Downloader Bot*\n\n"
-        "Send me a song or artist name and I'll find it for you!\n\n"
+        "**Two ways to use me:**\n\n"
+        "1️⃣ *Direct mode:* Send me a song name here\n"
+        "2️⃣ *Inline mode:* Type `@yourbot song name` in any chat\n\n"
         "**Search Priority:**\n"
-        "1️⃣ 🎵 SoundCloud (primary)\n"
-        "2️⃣ 🎸 Bandcamp\n"
-        "3️⃣ 🎼 VK Music\n"
-        "4️⃣ 🎧 Mixcloud\n"
-        "5️⃣ 📺 YouTube (fallback)\n\n"
-        "**Example:** `daft punk`\n\n"
-        "High-quality audio downloads from multiple sources!",
+        "🎵 SoundCloud (primary)\n"
+        "🎸 Bandcamp\n"
+        "🎼 VK Music\n"
+        "🎧 Mixcloud\n"
+        "📺 YouTube (fallback)\n\n"
+        "**Example:** `lady gaga`\n"
+        "**Inline:** `@yourbot lady gaga` (in any chat)\n\n"
+        "High-quality audio from multiple sources!",
         parse_mode="Markdown"
     )
 
@@ -235,18 +249,19 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Try:\n"
                 "• Different search terms\n"
                 "• Artist name only\n"
-                "• Song title only"
+                "• Song title only\n\n"
+                "Or use inline mode: `@yourbot song name`",
+                parse_mode="Markdown"
             )
             return
 
-        # Store results with short IDs
+        # Store results
         user_id = update.effective_user.id
         search_cache[user_id] = results
         
-        # Create buttons with index
+        # Create buttons
         buttons = []
         for i, (title, url, platform) in enumerate(results):
-            # Truncate long titles for button display
             display_title = title[:65] + "..." if len(title) > 65 else title
             buttons.append([InlineKeyboardButton(display_title, callback_data=f"{i}")])
         
@@ -272,12 +287,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     
-    # Get the track index from callback data
     try:
         track_index = int(q.data)
         user_id = update.effective_user.id
         
-        # Retrieve URL from cache
         if user_id not in search_cache or track_index >= len(search_cache[user_id]):
             await q.edit_message_text("❌ Track not found. Please search again.")
             return
@@ -289,11 +302,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     logger.info(f"Download requested from {platform}: {url}")
-    status = await q.edit_message_text(f"⏳ Downloading from {platform}... This may take a minute.")
+    status = await q.edit_message_text(f"⏳ Downloading from {platform}...")
 
     tmpdir = tempfile.mkdtemp()
     
-    # Configure download options based on platform
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(tmpdir, "%(title)s.%(ext)s"),
@@ -309,7 +321,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "keepvideo": False
     }
     
-    # Add platform-specific options
     if platform == "youtube":
         ydl_opts["extractor_args"] = {
             "youtube": {
@@ -319,7 +330,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         if COOKIES_FILE and os.path.exists(COOKIES_FILE):
             ydl_opts["cookiefile"] = COOKIES_FILE
-            logger.info("Using cookies for YouTube download")
     
     success = False
     
@@ -327,29 +337,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Starting download from {platform}: {url}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            # Find the output file
             base_path = ydl.prepare_filename(info)
             file_path = base_path.rsplit('.', 1)[0] + '.mp3'
             track_title = info.get("title", "Audio Track")
             artist = info.get("artist") or info.get("uploader", "Unknown Artist")
 
-        logger.info(f"Download complete from {platform}: {file_path}")
+        logger.info(f"Download complete: {file_path}")
         success = True
             
     except Exception as e:
-        logger.error(f"Download error from {platform}: {e}")
+        logger.error(f"Download error: {e}")
         await status.edit_text(
             f"⚠️ Couldn't download from {platform}.\n\n"
             f"Error: {str(e)[:100]}\n\n"
-            f"Try another track or search again."
+            "Try another track or search again."
         )
         return
     
     if success:
         try:
-            logger.info(f"Sending audio file: {file_path}")
-            
-            # Send the audio file
             with open(file_path, "rb") as audio_file:
                 await q.message.reply_audio(
                     audio=audio_file,
@@ -359,7 +365,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             
             await status.edit_text(f"✅ Sent: *{track_title}*\n📍 From: {platform.title()}", parse_mode="Markdown")
-            logger.info(f"Successfully sent: {track_title}")
             
             # Cleanup
             try:
@@ -387,6 +392,7 @@ def build_app() -> Application:
     
     # Add handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(InlineQueryHandler(inline_query))  # NEW: Inline mode handler
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search))
     app.add_error_handler(error_handler)
@@ -395,7 +401,7 @@ def build_app() -> Application:
 
 
 if __name__ == "__main__":
-    logger.info("Starting Multi-Platform Music Bot...")
+    logger.info("Starting Multi-Platform Music Bot with Inline Mode...")
     app = build_app()
 
     if WEBHOOK_BASE_URL:
@@ -406,7 +412,6 @@ if __name__ == "__main__":
         logger.info(f"   URL: {webhook_url}")
         logger.info(f"   Port: {PORT}")
         
-        # Start webhook
         app.run_webhook(
             listen="0.0.0.0",
             port=PORT,
