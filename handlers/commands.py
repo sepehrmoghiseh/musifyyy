@@ -99,11 +99,18 @@ async def _show_results_page(message, results: list, page: int, query: str):
     # Create buttons for tracks on this page
     buttons = []
     for i in range(start_idx, end_idx):
-        title, url, platform = results[i]
+        title, url, platform, content_type = results[i]
         display_title = truncate_title(title)
-        buttons.append([
-            InlineKeyboardButton(display_title, callback_data=f"download_{i}")
-        ])
+        
+        # Different callback for albums vs tracks
+        if content_type == "album":
+            buttons.append([
+                InlineKeyboardButton(display_title, callback_data=f"album_{i}")
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton(display_title, callback_data=f"download_{i}")
+            ])
     
     # Add navigation buttons
     nav_buttons = []

@@ -17,7 +17,7 @@ class MusicSearchEngine:
     def __init__(self):
         self.cookies_file = COOKIES_FILE
     
-    def search(self, query: str, n: int = 30) -> List[Tuple[str, str, str]]:
+    def search(self, query: str, n: int = 30) -> List[Tuple[str, str, str, str]]:
         """
         Search for music across multiple platforms.
         
@@ -26,13 +26,14 @@ class MusicSearchEngine:
             n: Number of results to return (default 30 for pagination)
             
         Returns:
-            List of tuples: (title, url, platform)
+            List of tuples: (title, url, platform, content_type)
+            content_type can be: 'track', 'album', 'playlist'
         """
         logger.info(f"Searching for: {query} (requesting {n} results)")
         
         all_results = []
         
-        # Try SoundCloud first - get more results
+        # Try SoundCloud first - get albums and tracks
         soundcloud_results = self._search_soundcloud(query, n)
         all_results.extend(soundcloud_results)
         
@@ -49,8 +50,8 @@ class MusicSearchEngine:
         logger.info(f"Total results: {len(all_results)}")
         return all_results[:n] if all_results else []
     
-    def _search_soundcloud(self, query: str, n: int) -> List[Tuple[str, str, str]]:
-        """Search SoundCloud for music."""
+    def _search_soundcloud(self, query: str, n: int) -> List[Tuple[str, str, str, str]]:
+        """Search SoundCloud for music, albums, and playlists."""
         results = []
         
         try:
@@ -73,14 +74,26 @@ class MusicSearchEngine:
                     title = entry.get("title", "Unknown title")
                     url = entry.get("url") or entry.get("webpage_url") or entry.get("id")
                     
+                    # Detect content type
+                    content_type = "track"
+                    if "/sets/" in str(url):  # SoundCloud playlist/album
+                        content_type = "album"
+                        emoji = "💿"
+                    else:
+                        emoji = "🎵"
+                    
                     if url and title != "Unknown title":
-                        # Format title with duration
-                        formatted_title = self._format_title(
-                            title, 
-                            entry.get("duration"),
-                            "🎵"
-                        )
-                        results.append((formatted_title, url, "soundcloud"))
+                        # Format title with duration (if single track)
+                        if content_type == "album":
+                            track_count = entry.get("playlist_count", "?")
+                            formatted_title = f"{emoji} {title} [{track_count} tracks]"
+                        else:
+                            formatted_title = self._format_title(
+                                title, 
+                                entry.get("duration"),
+                                emoji
+                            )
+                        results.append((formatted_title, url, "soundcloud", content_type))
             
             logger.info(f"SoundCloud: Found {len(results)} results")
         except Exception as e:
@@ -88,8 +101,8 @@ class MusicSearchEngine:
         
         return results
     
-    def _search_youtube(self, query: str, n: int) -> List[Tuple[str, str, str]]:
-        """Search YouTube for music."""
+    def _search_youtube(self, query: str, n: int) -> List[Tuple[str, str, str, str]]:
+        """Search YouTube for music and albums/playlists."""
         results = []
         
         try:
@@ -124,14 +137,25 @@ class MusicSearchEngine:
                     if url and not url.startswith("http"):
                         url = f"https://www.youtube.com/watch?v={url}"
                     
+                    # Detect if it's a playlist/album
+                    content_type = "track"
+                    if "playlist" in title.lower() or "album" in title.lower():
+                        content_type = "album"
+                        emoji = "💿"
+                    else:
+                        emoji = "📺"
+                    
                     if url and title != "Unknown title":
-                        # Format title with duration
-                        formatted_title = self._format_title(
-                            title, 
-                            entry.get("duration"),
-                            "📺"
-                        )
-                        results.append((formatted_title, url, "youtube"))
+                        # Format title with duration (if single track)
+                        if content_type == "album":
+                            formatted_title = f"{emoji} {title} [Album/Playlist]"
+                        else:
+                            formatted_title = self._format_title(
+                                title, 
+                                entry.get("duration"),
+                                emoji
+                            )
+                        results.append((formatted_title, url, "youtube", content_type))
             
             logger.info(f"YouTube: Found {len(results)} results")
         except Exception as e:

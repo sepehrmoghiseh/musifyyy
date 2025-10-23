@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks - download selected track or navigate pages."""
+    """Handle button callbacks - download selected track/album or navigate pages."""
     query = update.callback_query
     await query.answer()
     
@@ -44,7 +44,19 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Page navigation error: {e}")
             return
     
-    # Handle download
+    # Handle album download
+    if callback_data.startswith("album_"):
+        try:
+            track_index = int(callback_data.split("_")[1])
+        except (ValueError, IndexError):
+            await query.edit_message_text("❌ Invalid selection. Please search again.")
+            return
+        
+        # Download album
+        await _download_album(query, user_id, track_index)
+        return
+    
+    # Handle single track download
     if callback_data.startswith("download_"):
         try:
             track_index = int(callback_data.split("_")[1])
@@ -59,10 +71,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Invalid selection. Please search again.")
             return
     
-    # Download the track
+    # Download single track
+    await _download_single_track(query, user_id, track_index)
+
+
+async def _download_single_track(query, user_id: int, track_index: int):
+    """Download and send a single track."""
     try:
-        user_id = update.effective_user.id
-        
         # Check if user has cached results
         if not search_cache.has(user_id):
             await query.edit_message_text("❌ Track not found. Please search again.")
@@ -74,7 +89,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Track not found. Please search again.")
             return
         
-        title, url, platform = results[track_index]
+        title, url, platform, content_type = results[track_index]
         
     except (ValueError, KeyError):
         await query.edit_message_text("❌ Invalid selection. Please search again.")
@@ -119,6 +134,95 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"⚠️ Downloaded but couldn't send: {str(e)[:50]}")
 
 
+async def _download_album(query, user_id: int, track_index: int):
+    """Download and send all tracks from an album."""
+    try:
+        # Check if user has cached results
+        if not search_cache.has(user_id):
+            await query.edit_message_text("❌ Album not found. Please search again.")
+            return
+        
+        results = search_cache.get(user_id)
+        
+        if track_index >= len(results):
+            await query.edit_message_text("❌ Album not found. Please search again.")
+            return
+        
+        title, url, platform, content_type = results[track_index]
+        
+        logger.info(f"Album download requested from {platform}: {url}")
+        status = await query.edit_message_text(
+            f"💿 Downloading album from {platform}...\n"
+            f"⏳ This may take a few minutes..."
+        )
+        
+        # Track download
+        analytics.track_download(platform)
+        
+        # Download all tracks from album
+        album_tracks = downloader.download_album(url, platform)
+        
+        if not album_tracks:
+            await status.edit_text(
+                f"⚠️ Couldn't download album from {platform}.\n\n"
+                "Try another album or search again."
+            )
+            return
+        
+        # Send all tracks one by one
+        successful = 0
+        failed = 0
+        
+        await status.edit_text(
+            f"💿 Sending {len(album_tracks)} tracks...\n"
+            f"⏳ Please wait..."
+        )
+        
+        for idx, (file_path, track_title, artist) in enumerate(album_tracks, 1):
+            if not file_path:
+                failed += 1
+                continue
+            
+            try:
+                with open(file_path, "rb") as audio_file:
+                    await query.message.reply_audio(
+                        audio=audio_file,
+                        title=track_title,
+                        performer=artist,
+                        caption=f"🎵 {track_title}\n📍 Track {idx}/{len(album_tracks)}\n📍 Source: {platform.title()}"
+                    )
+                successful += 1
+                
+                # Update progress
+                if idx % 3 == 0:  # Update every 3 tracks
+                    await status.edit_text(
+                        f"💿 Sending tracks... ({idx}/{len(album_tracks)})\n"
+                        f"✅ Sent: {successful} | ⚠️ Failed: {failed}"
+                    )
+                
+                # Cleanup this track
+                downloader.cleanup_files(file_path)
+                
+            except Exception as e:
+                failed += 1
+                logger.error(f"Failed to send track {idx}: {e}")
+        
+        # Final status
+        await status.edit_text(
+            f"✅ *Album Download Complete!*\n\n"
+            f"📊 Results:\n"
+            f"• Total tracks: {len(album_tracks)}\n"
+            f"• Sent successfully: {successful}\n"
+            f"• Failed: {failed}\n"
+            f"📍 Source: {platform.title()}",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Album download error: {e}")
+        await query.edit_message_text(f"⚠️ Album download failed: {str(e)[:100]}")
+
+
 async def _show_results_page(message, results: list, page: int):
     """Display a paginated page of search results."""
     total_results = len(results)
@@ -131,11 +235,18 @@ async def _show_results_page(message, results: list, page: int):
     # Create buttons for tracks on this page
     buttons = []
     for i in range(start_idx, end_idx):
-        title, url, platform = results[i]
+        title, url, platform, content_type = results[i]
         display_title = truncate_title(title)
-        buttons.append([
-            InlineKeyboardButton(display_title, callback_data=f"download_{i}")
-        ])
+        
+        # Different callback for albums vs tracks
+        if content_type == "album":
+            buttons.append([
+                InlineKeyboardButton(display_title, callback_data=f"album_{i}")
+            ])
+        else:
+            buttons.append([
+                InlineKeyboardButton(display_title, callback_data=f"download_{i}")
+            ])
     
     # Add navigation buttons
     nav_buttons = []
