@@ -16,6 +16,7 @@ from core.search import search_engine
 from core.downloader import downloader
 from core.analytics import analytics
 from utils.helpers import inline_result_cache, clean_title
+from utils.database import user_db
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline queries - show search results in dropdown."""
     query = update.inline_query.query
+    
+    # Track user activity
+    user = update.inline_query.from_user
+    user_db.add_user(user.id, user.username, user.first_name)
     
     # Require at least 3 characters
     if not query or len(query) < 3:

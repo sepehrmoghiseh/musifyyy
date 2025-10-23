@@ -21,7 +21,7 @@ from telegram.ext import (
 )
 
 from config.settings import BOT_TOKEN, WEBHOOK_BASE_URL, PORT, validate_config
-from handlers.commands import start, stats, search
+from handlers.commands import start, stats, search, broadcast, users
 from handlers.inline import inline_query, chosen_inline_result
 from handlers.callbacks import button_callback, error_handler
 
@@ -49,6 +49,8 @@ def build_application():
     # Add command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("users", users))
     
     # Add inline mode handlers
     app.add_handler(InlineQueryHandler(inline_query))

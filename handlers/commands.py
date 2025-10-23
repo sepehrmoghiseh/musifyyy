@@ -9,14 +9,20 @@ from telegram.ext import ContextTypes
 from core.search import search_engine
 from core.analytics import analytics
 from utils.helpers import search_cache, format_platform_summary, truncate_title
-from config.settings import SEARCH_RESULTS_TOTAL, RESULTS_PER_PAGE
+from utils.database import user_db
+from config.settings import SEARCH_RESULTS_TOTAL, RESULTS_PER_PAGE, ADMIN_USER_IDS
 
 logger = logging.getLogger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
-    logger.info("Start command received")
+    user = update.effective_user
+    logger.info(f"Start command received from user {user.id}")
+    
+    # Add user to database
+    user_db.add_user(user.id, user.username, user.first_name)
+    
     await update.message.reply_text(
         "🎵 *Multi-Platform Music Downloader Bot*\n\n"
         "**Two ways to use me:**\n\n"
@@ -49,6 +55,10 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ignore commands
     if not query or query.startswith("/"):
         return
+    
+    # Track user activity
+    user = update.effective_user
+    user_db.add_user(user.id, user.username, user.first_name)
     
     logger.info(f"Search query received: {query}")
     msg = await update.message.reply_text(
@@ -128,6 +138,107 @@ async def _show_results_page(message, results: list, page: int, query: str):
         f"📄 Page {page+1}/{total_pages} (showing {start_idx+1}-{end_idx})\n\n"
         "Choose a track to download:",
         reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /broadcast command - Admin only.
+    Usage: /broadcast Your message here
+    """
+    user_id = update.effective_user.id
+    
+    # Check if user is admin
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("❌ This command is only available to administrators.")
+        return
+    
+    # Get message to broadcast
+    if not context.args:
+        await update.message.reply_text(
+            "📢 *Broadcast Message*\n\n"
+            "Usage: `/broadcast Your message here`\n\n"
+            "This will send your message to all bot users.\n\n"
+            "Example:\n"
+            "`/broadcast 🎉 New features available! Try searching now!`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    broadcast_text = " ".join(context.args)
+    
+    # Get all users
+    all_users = user_db.get_all_user_ids()
+    total_users = len(all_users)
+    
+    if total_users == 0:
+        await update.message.reply_text("No users to broadcast to.")
+        return
+    
+    # Confirm broadcast
+    confirm_msg = await update.message.reply_text(
+        f"📢 Broadcasting to {total_users} users...\n"
+        f"Message: _{broadcast_text}_\n\n"
+        f"⏳ Please wait...",
+        parse_mode="Markdown"
+    )
+    
+    # Send to all users
+    success_count = 0
+    failed_count = 0
+    blocked_count = 0
+    
+    for user_id in all_users:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"📢 *Message from Musifyyy Bot*\n\n{broadcast_text}",
+                parse_mode="Markdown"
+            )
+            success_count += 1
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "blocked" in error_msg or "user is deactivated" in error_msg:
+                blocked_count += 1
+                # Remove blocked users from database
+                user_db.remove_user(user_id)
+            else:
+                failed_count += 1
+            logger.warning(f"Failed to send broadcast to {user_id}: {e}")
+    
+    # Send summary
+    await confirm_msg.edit_text(
+        f"✅ *Broadcast Complete*\n\n"
+        f"📊 Results:\n"
+        f"• Sent successfully: {success_count}\n"
+        f"• Blocked/Deactivated: {blocked_count}\n"
+        f"• Failed: {failed_count}\n"
+        f"• Total attempted: {total_users}",
+        parse_mode="Markdown"
+    )
+    
+    logger.info(f"Broadcast completed: {success_count}/{total_users} successful")
+
+
+async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /users command - Admin only.
+    Shows user statistics.
+    """
+    user_id = update.effective_user.id
+    
+    # Check if user is admin
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("❌ This command is only available to administrators.")
+        return
+    
+    total_users = user_db.get_user_count()
+    
+    await update.message.reply_text(
+        f"👥 *User Statistics*\n\n"
+        f"Total subscribers: {total_users}\n\n"
+        f"Use `/broadcast message` to send a message to all users.",
         parse_mode="Markdown"
     )
 

@@ -14,6 +14,9 @@ A powerful Telegram bot for searching and downloading music from multiple platfo
 - **📥 Direct Downloads**: Download high-quality MP3 audio (192kbps)
 - **💬 Inline Mode**: Use the bot in any chat with `@musifyyybot song name`
 - **📊 Analytics**: Track popular searches, downloads, and platform usage
+- **📄 Pagination**: Browse through 30 results, 5 per page
+- **📢 Broadcast (Admin)**: Send messages to all subscribers
+- **👥 User Tracking**: Automatic subscriber management
 - **🎯 Smart Search Priority**: 
   - 🎵 SoundCloud (primary)
   - 🎸 Bandcamp
@@ -78,6 +81,7 @@ Create a `.env` file or set these in your hosting platform:
 BOT_TOKEN=your_telegram_bot_token_here
 WEBHOOK_BASE_URL=https://your-app-name.onrender.com
 PORT=8080
+ADMIN_USER_ID=your_telegram_user_id  # Optional: For broadcast feature
 ```
 
 ### Deploy on Render
@@ -92,6 +96,7 @@ PORT=8080
 3. **Set Environment Variables**
    - `BOT_TOKEN`: Your Telegram bot token
    - `WEBHOOK_BASE_URL`: Your Render app URL
+   - `ADMIN_USER_ID`: Your Telegram user ID (optional, for admin features)
 
 4. **Add Secrets** (Optional for YouTube)
    - Upload `cookies.txt` in Render secret files at `/etc/secrets/cookies.txt`

@@ -13,6 +13,13 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
+# Admin user ID(s) - Add your Telegram user ID here
+# To get your ID, message @userinfobot on Telegram
+ADMIN_USER_IDS = [
+    int(os.environ.get("ADMIN_USER_ID", "0"))  # Set via environment variable
+    # Or add directly: 123456789, 987654321
+]
+
 # ========== SEARCH CONFIGURATION ==========
 SEARCH_RESULTS_TOTAL = 30  # Total number of search results to fetch
 RESULTS_PER_PAGE = 5  # Number of results to show per page
