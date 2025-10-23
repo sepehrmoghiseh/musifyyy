@@ -24,19 +24,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_db.add_user(user.id, user.username, user.first_name)
     
     await update.message.reply_text(
-        "🎵 *Multi-Platform Music Downloader Bot*\n\n"
-        "**Two ways to use me:**\n\n"
-        "1️⃣ *Direct mode:* Send me a song name here\n"
-        "2️⃣ *Inline mode:* Type `@musifyyyybot song name` in any chat\n\n"
-        "**Search Priority:**\n"
-        "🎵 SoundCloud (primary)\n"
-        "🎸 Bandcamp\n"
-        "🎼 VK Music\n"
-        "🎧 Mixcloud\n"
-        "📺 YouTube (fallback)\n\n"
-        "**Example:** `lady gaga`\n"
-        "**Inline:** `@musifyyyybot lady gaga`\n\n"
-        "Type /stats to see usage statistics!",
+        "🎵 *Music Downloader Bot*\n\n"
+        "**Example: just send ** `lady gaga | مهستی| مایکل جکسون`\n",
         parse_mode="Markdown"
     )
 
