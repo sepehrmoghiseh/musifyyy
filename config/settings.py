@@ -14,7 +14,8 @@ WEBHOOK_BASE_URL = os.environ.get("WEBHOOK_BASE_URL", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
 # ========== SEARCH CONFIGURATION ==========
-SEARCH_RESULTS = 6  # Number of search results to display
+SEARCH_RESULTS_TOTAL = 30  # Total number of search results to fetch
+RESULTS_PER_PAGE = 5  # Number of results to show per page
 
 # ========== DOWNLOAD CONFIGURATION ==========
 AUDIO_QUALITY = "192"  # MP3 quality in kbps

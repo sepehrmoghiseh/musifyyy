@@ -17,31 +17,33 @@ class MusicSearchEngine:
     def __init__(self):
         self.cookies_file = COOKIES_FILE
     
-    def search(self, query: str, n: int = 6) -> List[Tuple[str, str, str]]:
+    def search(self, query: str, n: int = 30) -> List[Tuple[str, str, str]]:
         """
         Search for music across multiple platforms.
         
         Args:
             query: Search query string
-            n: Number of results to return
+            n: Number of results to return (default 30 for pagination)
             
         Returns:
             List of tuples: (title, url, platform)
         """
-        logger.info(f"Searching for: {query}")
+        logger.info(f"Searching for: {query} (requesting {n} results)")
         
         all_results = []
         
-        # Try SoundCloud first
+        # Try SoundCloud first - get more results
         soundcloud_results = self._search_soundcloud(query, n)
         all_results.extend(soundcloud_results)
         
         # If we have enough results, return them
         if len(all_results) >= n:
+            logger.info(f"Total results: {len(all_results[:n])}")
             return all_results[:n]
         
-        # Try YouTube as fallback
-        youtube_results = self._search_youtube(query, n - len(all_results))
+        # Try YouTube as fallback to fill remaining slots
+        remaining = n - len(all_results)
+        youtube_results = self._search_youtube(query, remaining)
         all_results.extend(youtube_results)
         
         logger.info(f"Total results: {len(all_results)}")

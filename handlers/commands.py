@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from core.search import search_engine
 from core.analytics import analytics
 from utils.helpers import search_cache, format_platform_summary, truncate_title
-from config.settings import SEARCH_RESULTS
+from config.settings import SEARCH_RESULTS_TOTAL, RESULTS_PER_PAGE
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +60,8 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Track the search
         analytics.track_search(query)
         
-        # Perform search
-        results = search_engine.search(query, n=SEARCH_RESULTS)
+        # Perform search - get all results (30)
+        results = search_engine.search(query, n=SEARCH_RESULTS_TOTAL)
         
         if not results:
             await msg.edit_text(
@@ -79,25 +79,55 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         search_cache.store(user_id, results)
         
-        # Create inline keyboard buttons
-        buttons = []
-        for i, (title, url, platform) in enumerate(results):
-            display_title = truncate_title(title)
-            buttons.append([
-                InlineKeyboardButton(display_title, callback_data=f"{i}")
-            ])
-        
-        # Format summary
-        summary = format_platform_summary(results)
-        
-        await msg.edit_text(
-            f"🎵 *Found {len(results)} tracks*\n"
-            f"_{summary}_\n\n"
-            "Choose a track to download:",
-            reply_markup=InlineKeyboardMarkup(buttons),
-            parse_mode="Markdown"
-        )
+        # Show first page (5 results)
+        await _show_results_page(msg, results, page=0, query=query)
         
     except Exception as e:
         logger.error(f"Search handler error: {e}")
         await msg.edit_text(f"⚠️ Error: {str(e)[:100]}")
+
+
+async def _show_results_page(message, results: list, page: int, query: str):
+    """Display a paginated page of search results."""
+    total_results = len(results)
+    total_pages = (total_results + RESULTS_PER_PAGE - 1) // RESULTS_PER_PAGE
+    
+    # Calculate start and end indices for this page
+    start_idx = page * RESULTS_PER_PAGE
+    end_idx = min(start_idx + RESULTS_PER_PAGE, total_results)
+    page_results = results[start_idx:end_idx]
+    
+    # Create buttons for tracks on this page
+    buttons = []
+    for i in range(start_idx, end_idx):
+        title, url, platform = results[i]
+        display_title = truncate_title(title)
+        buttons.append([
+            InlineKeyboardButton(display_title, callback_data=f"download_{i}")
+        ])
+    
+    # Add navigation buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"page_{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="page_info"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{page+1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    # Format summary
+    summary = format_platform_summary(results)
+    
+    await message.edit_text(
+        f"🎵 *Found {total_results} tracks*\n"
+        f"_{summary}_\n\n"
+        f"📄 Page {page+1}/{total_pages} (showing {start_idx+1}-{end_idx})\n\n"
+        "Choose a track to download:",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode="Markdown"
+    )
+
