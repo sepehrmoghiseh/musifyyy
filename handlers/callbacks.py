@@ -2,7 +2,6 @@
 Callback query handlers for the Musifyyy Bot.
 Handles button clicks and downloads from search results.
 """
-import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -114,34 +113,45 @@ async def _download_single_track(query, user_id: int, track_index: int):
     
     # Send the audio file
     try:
-        # Check file size (Telegram limit is 50MB)
-        file_size = os.path.getsize(file_path)
-        max_size = 50 * 1024 * 1024  # 50MB in bytes
-        
-        if file_size > max_size:
-            size_mb = file_size / (1024 * 1024)
+        # Ensure file fits within Telegram upload limit (50 MB)
+        max_size = downloader.telegram_limit_bytes
+        final_size, adjusted_bitrate, within_limit = downloader.ensure_telegram_filesize(
+            file_path,
+            max_size_bytes=max_size,
+        )
+
+        if not within_limit:
+            size_mb = final_size / (1024 * 1024)
             await status.edit_text(
-                f"⚠️ *File too large to send*\n\n"
-                f"📊 Size: {size_mb:.1f} MB (Telegram limit: 50 MB)\n\n"
-                f"💡 This appears to be a full album in one file.\n"
-                f"Try searching for individual tracks instead.",
+                "*File too large to send*\n\n"
+                f"Size: {size_mb:.1f} MB (Telegram limit: 50 MB).\n"
+                "This file could not be compressed enough for Telegram. "
+                "Try another track or a different source.",
                 parse_mode="Markdown"
             )
             downloader.cleanup_files(file_path)
             return
+
+        caption_lines = [
+            track_title,
+            f"Source: {platform.title()}",
+        ]
+        if adjusted_bitrate:
+            caption_lines.append(f"Bitrate adjusted to {adjusted_bitrate} kbps.")
         
         with open(file_path, "rb") as audio_file:
             await query.message.reply_audio(
                 audio=audio_file,
                 title=track_title,
                 performer=artist,
-                caption=f"🎵 {track_title}\n📍 Source: {platform.title()}"
+                caption="\n".join(caption_lines)
             )
         
-        await status.edit_text(
-            f"✅ Sent: *{track_title}*\n📍 From: {platform.title()}", 
-            parse_mode="Markdown"
-        )
+        status_message = f"Sent: *{track_title}*\nSource: {platform.title()}"
+        if adjusted_bitrate:
+            status_message += f"\nBitrate adjusted to {adjusted_bitrate} kbps."
+        
+        await status.edit_text(status_message, parse_mode="Markdown")
         
         # Cleanup
         downloader.cleanup_files(file_path)
@@ -189,49 +199,94 @@ async def _download_album(query, user_id: int, track_index: int):
         # Send all tracks one by one
         successful = 0
         failed = 0
-        
+        oversized_tracks = []
+        max_size = downloader.telegram_limit_bytes  # Telegram limit
+
         await status.edit_text(
             f"💿 Sending {len(album_tracks)} tracks...\n"
             f"⏳ Please wait..."
         )
-        
+
         for idx, (file_path, track_title, artist) in enumerate(album_tracks, 1):
             if not file_path:
                 failed += 1
                 continue
-            
+
             try:
+                final_size, adjusted_bitrate, within_limit = downloader.ensure_telegram_filesize(
+                    file_path,
+                    max_size_bytes=max_size,
+                )
+
+                if not within_limit:
+                    failed += 1
+                    oversized_tracks.append((track_title, final_size))
+                    downloader.cleanup_files(file_path)
+                    logger.warning(
+                        "Track %s exceeds Telegram file size limit after compression attempts: %.2f MB",
+                        track_title,
+                        final_size / (1024 * 1024)
+                    )
+                    continue
+
+                caption_lines = [
+                    track_title,
+                    f"Track {idx}/{len(album_tracks)}",
+                    f"Source: {platform.title()}",
+                ]
+                if adjusted_bitrate:
+                    caption_lines.append(f"Bitrate adjusted to {adjusted_bitrate} kbps.")
+
                 with open(file_path, "rb") as audio_file:
                     await query.message.reply_audio(
                         audio=audio_file,
                         title=track_title,
                         performer=artist,
-                        caption=f"🎵 {track_title}\n📍 Track {idx}/{len(album_tracks)}\n📍 Source: {platform.title()}"
+                        caption="\n".join(caption_lines)
                     )
                 successful += 1
-                
+
                 # Update progress
                 if idx % 3 == 0:  # Update every 3 tracks
                     await status.edit_text(
                         f"💿 Sending tracks... ({idx}/{len(album_tracks)})\n"
                         f"✅ Sent: {successful} | ⚠️ Failed: {failed}"
                     )
-                
+
                 # Cleanup this track
                 downloader.cleanup_files(file_path)
-                
+
             except Exception as e:
                 failed += 1
                 logger.error(f"Failed to send track {idx}: {e}")
-        
+
         # Final status
+        extra_notes = ""
+        if oversized_tracks:
+            preview_lines = []
+            for title_text, size_bytes in oversized_tracks[:3]:
+                size_mb = size_bytes / (1024 * 1024)
+                preview_lines.append(f"• {truncate_title(title_text)} ({size_mb:.1f} MB)")
+            more_note = "\n…" if len(oversized_tracks) > 3 else ""
+            extra_notes = (
+                "\n\n⚠️ Some tracks exceeded Telegram's 50 MB limit:\n"
+                + "\n".join(preview_lines)
+                + more_note
+            )
+            if successful == 0 and len(album_tracks) == 1:
+                extra_notes += (
+                    "\n\n💡 This entry appears to be a single large file. "
+                    "Try searching for individual tracks instead."
+                )
+
         await status.edit_text(
             f"✅ *Album Download Complete!*\n\n"
             f"📊 Results:\n"
             f"• Total tracks: {len(album_tracks)}\n"
             f"• Sent successfully: {successful}\n"
             f"• Failed: {failed}\n"
-            f"📍 Source: {platform.title()}",
+            f"📍 Source: {platform.title()}"
+            f"{extra_notes}",
             parse_mode="Markdown"
         )
         

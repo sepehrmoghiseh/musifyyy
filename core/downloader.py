@@ -5,6 +5,8 @@ Handles downloading and converting audio from various platforms.
 import os
 import tempfile
 import logging
+import subprocess
+import shutil
 from typing import Tuple, Optional, List
 import yt_dlp
 
@@ -20,6 +22,7 @@ class AudioDownloader:
         self.cookies_file = COOKIES_FILE
         self.audio_quality = AUDIO_QUALITY
         self.audio_format = AUDIO_FORMAT
+        self.telegram_limit_bytes = 50 * 1_000_000  # Telegram bot upload limit (bytes)
     
     def download(
         self, 
@@ -184,12 +187,103 @@ class AudioDownloader:
         except Exception as e:
             logger.error(f"Album download error: {e}")
             return []
-    
+
+    def ensure_telegram_filesize(
+        self,
+        file_path: str,
+        max_size_bytes: Optional[int] = None
+    ) -> Tuple[int, Optional[int], bool]:
+        """
+        Ensure an audio file fits within Telegram's upload limit.
+
+        Args:
+            file_path: Path to the audio file.
+            max_size_bytes: Optional override for the size limit.
+
+        Returns:
+            Tuple of (final_size_bytes, applied_bitrate, within_limit).
+            applied_bitrate is None when no re-encoding occurred.
+        """
+        if not file_path or not os.path.exists(file_path):
+            return 0, None, False
+
+        limit = max_size_bytes or self.telegram_limit_bytes
+        current_size = os.path.getsize(file_path)
+
+        if current_size <= limit:
+            return current_size, None, True
+
+        if not shutil.which("ffmpeg"):
+            logger.warning("ffmpeg not available; cannot reduce file size for Telegram.")
+            return current_size, None, False
+
+        bitrates = [160, 128, 96, 64]
+        base, ext = os.path.splitext(file_path)
+
+        for bitrate in bitrates:
+            temp_path = f"{base}_{bitrate}{ext}"
+            command = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                file_path,
+                "-b:a",
+                f"{bitrate}k",
+                temp_path,
+            ]
+
+            try:
+                subprocess.run(
+                    command,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as exc:
+                stderr_output = exc.stderr.decode(errors="ignore") if exc.stderr else str(exc)
+                logger.error(
+                    "Failed to re-encode %s at %s kbps: %s",
+                    file_path,
+                    bitrate,
+                    stderr_output[:500],
+                )
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                continue
+            except FileNotFoundError:
+                logger.error("ffmpeg binary not found while attempting re-encode.")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                break
+
+            new_size = os.path.getsize(temp_path)
+
+            if new_size <= limit:
+                os.replace(temp_path, file_path)
+                logger.info(
+                    "Reduced %s to %.1f MB using %d kbps bitrate to satisfy Telegram limit.",
+                    file_path,
+                    new_size / (1024 * 1024),
+                    bitrate,
+                )
+                return new_size, bitrate, True
+
+            os.remove(temp_path)
+
+        final_report_size = os.path.getsize(file_path) / (1024 * 1024)
+        logger.warning(
+            "Unable to reduce %s below Telegram's %.1f MB limit (current size %.1f MB).",
+            file_path,
+            limit / (1024 * 1024),
+            final_report_size,
+        )
+        return os.path.getsize(file_path), None, False
+
     @staticmethod
     def cleanup_files(*file_paths: str):
         """
         Clean up downloaded files.
-        
+
         Args:
             *file_paths: Variable number of file paths to delete
         """

@@ -78,14 +78,12 @@ class MusicSearchEngine:
                     content_type = "track"
                     entry_type = entry.get("_type", "")
                     
-                    # Check if it's a playlist/album
+                    # Check if it's a playlist/album (structural indicators only)
+                    playlist_count = entry.get("playlist_count")
                     is_playlist = (
                         "/sets/" in str(url) or  # SoundCloud sets
                         entry_type == "playlist" or
-                        entry.get("playlist_count") is not None or
-                        "álbum" in title.lower() or
-                        "album" in title.lower() or
-                        "completo" in title.lower()
+                        (isinstance(playlist_count, int) and playlist_count > 1)
                     )
                     
                     if is_playlist:
