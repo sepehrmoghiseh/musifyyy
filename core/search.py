@@ -74,9 +74,21 @@ class MusicSearchEngine:
                     title = entry.get("title", "Unknown title")
                     url = entry.get("url") or entry.get("webpage_url") or entry.get("id")
                     
-                    # Detect content type
+                    # Detect content type - check multiple indicators
                     content_type = "track"
-                    if "/sets/" in str(url):  # SoundCloud playlist/album
+                    entry_type = entry.get("_type", "")
+                    
+                    # Check if it's a playlist/album
+                    is_playlist = (
+                        "/sets/" in str(url) or  # SoundCloud sets
+                        entry_type == "playlist" or
+                        entry.get("playlist_count") is not None or
+                        "álbum" in title.lower() or
+                        "album" in title.lower() or
+                        "completo" in title.lower()
+                    )
+                    
+                    if is_playlist:
                         content_type = "album"
                         emoji = "💿"
                     else:
@@ -137,9 +149,20 @@ class MusicSearchEngine:
                     if url and not url.startswith("http"):
                         url = f"https://www.youtube.com/watch?v={url}"
                     
-                    # Detect if it's a playlist/album
+                    # Detect if it's a playlist/album - check multiple indicators
                     content_type = "track"
-                    if "playlist" in title.lower() or "album" in title.lower():
+                    entry_type = entry.get("_type", "")
+                    
+                    is_playlist = (
+                        entry_type == "playlist" or
+                        "playlist" in title.lower() or
+                        "album" in title.lower() or
+                        "álbum" in title.lower() or
+                        "completo" in title.lower() or
+                        "full album" in title.lower()
+                    )
+                    
+                    if is_playlist:
                         content_type = "album"
                         emoji = "💿"
                     else:

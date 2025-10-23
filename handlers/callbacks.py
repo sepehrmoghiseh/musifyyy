@@ -2,6 +2,7 @@
 Callback query handlers for the Musifyyy Bot.
 Handles button clicks and downloads from search results.
 """
+import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -113,6 +114,22 @@ async def _download_single_track(query, user_id: int, track_index: int):
     
     # Send the audio file
     try:
+        # Check file size (Telegram limit is 50MB)
+        file_size = os.path.getsize(file_path)
+        max_size = 50 * 1024 * 1024  # 50MB in bytes
+        
+        if file_size > max_size:
+            size_mb = file_size / (1024 * 1024)
+            await status.edit_text(
+                f"⚠️ *File too large to send*\n\n"
+                f"📊 Size: {size_mb:.1f} MB (Telegram limit: 50 MB)\n\n"
+                f"💡 This appears to be a full album in one file.\n"
+                f"Try searching for individual tracks instead.",
+                parse_mode="Markdown"
+            )
+            downloader.cleanup_files(file_path)
+            return
+        
         with open(file_path, "rb") as audio_file:
             await query.message.reply_audio(
                 audio=audio_file,
