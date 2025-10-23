@@ -153,16 +153,14 @@ class MusicSearchEngine:
                     content_type = "track"
                     entry_type = entry.get("_type", "")
                     
-                    is_playlist = (
+                    # Only mark as album if it's actually a playlist with multiple entries
+                    # NOT if it's just a single video titled "Full Album"
+                    is_actual_playlist = (
                         entry_type == "playlist" or
-                        "playlist" in title.lower() or
-                        "album" in title.lower() or
-                        "álbum" in title.lower() or
-                        "completo" in title.lower() or
-                        "full album" in title.lower()
+                        "playlist" in url.lower()
                     )
                     
-                    if is_playlist:
+                    if is_actual_playlist:
                         content_type = "album"
                         emoji = "💿"
                     else:

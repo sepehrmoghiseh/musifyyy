@@ -146,8 +146,8 @@ class AudioDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 
-                # Handle playlist/album
-                if "entries" in info:
+                # Handle playlist/album with multiple entries
+                if "entries" in info and info["entries"]:
                     for idx, entry in enumerate(info["entries"], 1):
                         if not entry:
                             continue
@@ -164,6 +164,19 @@ class AudioDownloader:
                         except Exception as e:
                             logger.error(f"Failed to process track {idx}: {e}")
                             downloaded_tracks.append((None, None, None))
+                
+                # Handle single video (mis-identified as album)
+                # This is a full album in one video, treat as single track
+                elif not info.get("entries"):
+                    logger.warning("This appears to be a single video, not a playlist. Treating as single track.")
+                    base_path = ydl.prepare_filename(info)
+                    file_path = base_path.rsplit('.', 1)[0] + f'.{self.audio_format}'
+                    track_title = info.get("title", "Album")
+                    artist = info.get("artist") or info.get("uploader", "Unknown Artist")
+                    
+                    if os.path.exists(file_path):
+                        downloaded_tracks.append((file_path, track_title, artist))
+                        logger.info(f"Single album file downloaded: {track_title}")
             
             logger.info(f"Album download complete: {len(downloaded_tracks)} tracks")
             return downloaded_tracks
