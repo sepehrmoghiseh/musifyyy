@@ -48,7 +48,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Build inline results
         inline_results = []
         
-        for title, url, platform in results:
+        for title, url, platform, content_type in results:
             result_id = str(uuid4())
             
             # Store result info for later tracking
@@ -56,6 +56,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "title": title,
                 "url": url,
                 "platform": platform,
+                "content_type": content_type,
                 "query": query
             })
             

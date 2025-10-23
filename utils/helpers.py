@@ -58,13 +58,13 @@ def format_platform_summary(results: list) -> str:
     Create a summary of platforms in search results.
     
     Args:
-        results: List of (title, url, platform) tuples
+        results: List of (title, url, platform, content_type) tuples
         
     Returns:
         Formatted platform summary string
     """
     platform_counts = {}
-    for _, _, platform in results:
+    for _, _, platform, _ in results:
         platform_counts[platform] = platform_counts.get(platform, 0) + 1
     
     return " • ".join([
