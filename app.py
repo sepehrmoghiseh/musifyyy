@@ -10,6 +10,9 @@ Telegram: @musifyyyybot
 GitHub: https://github.com/sepehrmoghiseh/musifyyy
 """
 import logging
+import asyncio
+from flask import Flask, request, jsonify
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -75,7 +78,7 @@ def main():
     logger.info("=" * 50)
     
     # Build the application
-    app = build_application()
+    telegram_app = build_application()
     
     # Run with webhook or polling
     if WEBHOOK_BASE_URL:
@@ -88,18 +91,49 @@ def main():
         logger.info(f"   Port: {PORT}")
         logger.info("=" * 50)
         
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path="webhook",
-            webhook_url=webhook_url,
-            drop_pending_updates=True
-        )
+        # Create Flask app for health checks and webhook
+        flask_app = Flask(__name__)
+        
+        @flask_app.route('/')
+        def health_check():
+            """Health check endpoint for monitoring services like cron-job.org"""
+            return jsonify({
+                'status': 'ok',
+                'bot': 'Musifyyy Bot',
+                'message': 'Bot is running! 🎵',
+                'webhook': 'active'
+            }), 200
+        
+        @flask_app.route('/webhook', methods=['POST'])
+        def webhook():
+            """Handle incoming webhook updates from Telegram"""
+            try:
+                update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+                # Process update in the event loop
+                asyncio.run(telegram_app.process_update(update))
+                return jsonify({'ok': True}), 200
+            except Exception as e:
+                logger.error(f"Error processing webhook: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        # Initialize the bot and set webhook
+        async def setup_webhook():
+            await telegram_app.initialize()
+            await telegram_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            logger.info(f"✅ Webhook set to: {webhook_url}")
+        
+        # Run setup
+        asyncio.run(setup_webhook())
+        
+        # Run Flask app
+        logger.info("🌐 Starting Flask web server...")
+        flask_app.run(host="0.0.0.0", port=PORT)
+        
     else:
         # Polling mode (for local development)
         logger.info("⚙️ POLLING MODE (Local Development)")
         logger.info("=" * 50)
-        app.run_polling(drop_pending_updates=True)
+        telegram_app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
