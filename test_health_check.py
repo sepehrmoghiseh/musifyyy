@@ -5,7 +5,7 @@ Run this after deploying to Render to ensure the bot stays awake.
 import requests
 import sys
 
-def test_health_check(url="https://musifyyy.onrender.com/"):
+def test_health_check(url="https://musifyyy-test.onrender.com"):
     """Test the health check endpoint."""
     print(f"🔍 Testing health check endpoint: {url}")
     print("=" * 60)
@@ -45,7 +45,7 @@ def test_health_check(url="https://musifyyy.onrender.com/"):
         return False
 
 
-def test_webhook_endpoint(url="https://musifyyy.onrender.com/webhook"):
+def test_webhook_endpoint(url="https://musifyyy-test.onrender.com/webhook"):
     """Test that webhook endpoint is accessible (should not return 404)."""
     print(f"\n🔍 Testing webhook endpoint: {url}")
     print("=" * 60)
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     print("=" * 60)
     
     # Allow custom URL as command line argument
-    url = sys.argv[1] if len(sys.argv) > 1 else "https://musifyyy.onrender.com/"
+    url = sys.argv[1] if len(sys.argv) > 1 else "https://musifyyy-test.onrender.com"
     
     # Run tests
     health_ok = test_health_check(url)
