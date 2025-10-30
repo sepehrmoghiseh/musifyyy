@@ -11,6 +11,7 @@ GitHub: https://github.com/sepehrmoghiseh/musifyyy
 """
 import logging
 import asyncio
+from threading import Thread
 from flask import Flask, request, jsonify
 from telegram import Update
 from telegram.ext import (
@@ -91,6 +92,28 @@ def main():
         logger.info(f"   Port: {PORT}")
         logger.info("=" * 50)
         
+        # Create event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Initialize the bot and set webhook
+        async def setup_webhook():
+            await telegram_app.initialize()
+            await telegram_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+            logger.info(f"✅ Webhook set to: {webhook_url}")
+        
+        # Run setup in the event loop
+        loop.run_until_complete(setup_webhook())
+        
+        # Start event loop in a separate thread
+        def run_event_loop():
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+        
+        event_thread = Thread(target=run_event_loop, daemon=True)
+        event_thread.start()
+        logger.info("🔄 Event loop started in background thread")
+        
         # Create Flask app for health checks and webhook
         flask_app = Flask(__name__)
         
@@ -109,21 +132,15 @@ def main():
             """Handle incoming webhook updates from Telegram"""
             try:
                 update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-                # Process update in the event loop
-                asyncio.run(telegram_app.process_update(update))
+                # Schedule update processing in the event loop
+                asyncio.run_coroutine_threadsafe(
+                    telegram_app.process_update(update),
+                    loop
+                )
                 return jsonify({'ok': True}), 200
             except Exception as e:
-                logger.error(f"Error processing webhook: {e}")
+                logger.error(f"Error processing webhook: {e}", exc_info=True)
                 return jsonify({'error': str(e)}), 500
-        
-        # Initialize the bot and set webhook
-        async def setup_webhook():
-            await telegram_app.initialize()
-            await telegram_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-            logger.info(f"✅ Webhook set to: {webhook_url}")
-        
-        # Run setup
-        asyncio.run(setup_webhook())
         
         # Run Flask app
         logger.info("🌐 Starting Flask web server...")
